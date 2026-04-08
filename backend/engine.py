@@ -1,35 +1,30 @@
 """
 FocusEngine — Event-Driven Cognitive Behaviour Orchestrator
 ============================================================
-Upgraded with three architectural capabilities:
-
-  ❗→✅  Real-time feedback loop
-          Violations trigger automatic negative learning signals.
-          Session completions trigger positive signals for all productive apps.
-          No retraining — weight deltas apply instantly via UserProfile.
-
-  ❗→✅  User personalization
-          Per-intent weight profiles loaded from UserProfile at session start.
-          Classifier uses these merged weights — different users (or intents)
-          produce different scores for the same app.
-
-  ❗→✅  Deep intent awareness
-          Intent string is parsed once by IntentEngine at session start into
-          a structured IntentProfile, then passed to every classify() call.
-          Positive/negative signals scale with intent specificity (strength).
+Upgraded capabilities:
+  ✅ Real-time feedback loop (violations → negative signals, completions → positive)
+  ✅ User personalization (per-intent weight profiles)
+  ✅ Deep intent awareness (IntentProfile parsed once per session)
+  ✅ Background learning via LearningManager (thread-safe, cooldown-guarded)
+  ✅ Structured logging (all print() removed)
+  ✅ elapsed_seconds recorded in SESSION_BROKEN for accurate failure prediction
 """
 
-from datetime import datetime, timedelta
+import logging
+import threading
 import time
 import uuid
-import threading
+from datetime import datetime, timedelta
 
-from .store      import EventStore
-from .monitor    import WindowMonitor
-from .classifier import classifier as clf
-from .logger     import logger
-from .intent_engine  import intent_engine, IntentProfile
-from .user_profile   import user_profile
+from .store            import EventStore
+from .monitor          import WindowMonitor
+from .classifier       import classifier as clf
+from .logger           import logger
+from .intent_engine    import intent_engine, IntentProfile
+from .user_profile     import user_profile
+from .learning_manager import LearningManager
+
+log = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 PENALTY_RULES        = [60, 120, 300]
@@ -76,9 +71,11 @@ class FocusEngine:
         self.intent_profile: IntentProfile | None = None
 
         # ── Per-session app tracking for auto-learning ────────────────────────
-        # Populated during _on_state_change, consumed when session ends
         self.session_productive_apps: list[str] = []
         self.session_violated_apps:   list[str] = []
+
+        # ── Background ML training orchestrator ───────────────────────────────
+        self.learning_manager = LearningManager()
 
         self._check_resume_session()
 
@@ -149,11 +146,13 @@ class FocusEngine:
     def _parse_intent(self, intent: str):
         """Parse intent string into structured IntentProfile (stored on self)."""
         self.intent_profile = intent_engine.parse(intent)
-        print(
-            f"[Engine] Intent parsed → key={self.intent_profile.intent_key} "
-            f"strength={self.intent_profile.strength:.2f} "
-            f"verb='{self.intent_profile.goal_verb}' "
-            f"subject='{self.intent_profile.goal_subject}'"
+        log.info(
+            "[Engine] Intent parsed → key=%s  strength=%.2f  "
+            "verb='%s'  subject='%s'",
+            self.intent_profile.intent_key,
+            self.intent_profile.strength,
+            self.intent_profile.goal_verb,
+            self.intent_profile.goal_subject,
         )
 
     def set_monitor(self, whitelist, blacklist, intent, mode):
@@ -326,6 +325,8 @@ class FocusEngine:
                 )
                 # Layer 1 auto-learning: reward productive apps on clean completion
                 self._apply_session_feedback(session, completed=True)
+                # Trigger background ML retrain (thread-safe, cooldown-guarded)
+                self.learning_manager.trigger_training()
                 if self.active_monitor:
                     self.active_monitor.stop()
 
@@ -390,10 +391,10 @@ class FocusEngine:
         )
 
         label = "completed" if completed else "broken/stopped"
-        print(
-            f"[Engine] Session {label} — auto-learned: "
-            f"{len(productive)} productive, {len(violated)} violated "
-            f"apps in intent '{intent_key}'"
+        log.info(
+            "[Engine] Session %s — auto-learned: %d productive, %d violated "
+            "apps in intent '%s'",
+            label, len(productive), len(violated), intent_key,
         )
 
         # Reset tracking lists for next session
@@ -486,13 +487,25 @@ class FocusEngine:
         session = self.store.get_current_session()
         if not session:
             return
+        # Compute elapsed time for accurate historic_break_pattern analysis
+        elapsed_seconds = 0.0
+        try:
+            elapsed_seconds = (
+                datetime.now() - datetime.fromisoformat(session["start_time"])
+            ).total_seconds() - session.get("paused_duration", 0)
+        except Exception:
+            pass
         self._apply_session_feedback(session, completed=False)
         self.store.append_event(
             "SESSION_BREAK_ATTEMPT", {"session_id": session["session_id"]}
         )
         self.store.append_event(
             "SESSION_BROKEN",
-            {"session_id": session["session_id"], "excuse": excuse},
+            {
+                "session_id":      session["session_id"],
+                "excuse":          excuse,
+                "elapsed_seconds": round(elapsed_seconds, 1),
+            },
         )
 
     def pause_session(self):

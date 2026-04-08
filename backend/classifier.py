@@ -4,23 +4,28 @@ FeatureClassifier — Cognitive Behaviour Engine (Feature Generator)
 Extracts features and performs hybrid classification:
   Heuristic (personalized, intent-aware) → Embeddings (semantic) → ML model
 
-Key upgrades over the original:
-  • concept_weights are now per-intent, pulled live from UserProfile
-  • Intent scoring replaced with IntentProfile.score_activity() — signals + strength
-  • apply_session_feedback() supports real-time weight correction (auto + manual)
-  • ml_error / ml_status exposed for health checks
-  • 100 ms classification budget enforced as before
+Improvements over original:
+  • Lazy model loading — _init_models_bg() fires only on the FIRST call to
+    extract_features(). If no session is ever started, the 4 GB SentenceTransformer
+    is never downloaded/loaded at all.
+  • All print() replaced with logging.getLogger(__name__).
+  • 100 ms classification budget retained.
 """
 
-import os
-import time
-import joblib
-import numpy as np
+from __future__ import annotations
+
 import concurrent.futures
+import logging
+import os
 import threading
+import time
+
+import numpy as np
 
 from .user_profile import user_profile
 from .intent_engine import IntentProfile
+
+log = logging.getLogger(__name__)
 
 
 class FeatureClassifier:
@@ -32,48 +37,70 @@ class FeatureClassifier:
         self.tfidf      = None
         self.embedder   = None
         self.util       = None
+        self.ml_error   = None
 
-        self._init_models_bg()
+        # Lazy loading state — models only load on first classify call
+        self._load_started = False
+        self._load_lock    = threading.Lock()
 
-    # ── Model Loading ─────────────────────────────────────────────────────────
+    # ── Lazy Model Loading ────────────────────────────────────────────────────
+
+    def _ensure_loaded(self):
+        """
+        Trigger model loading on the first call to extract_features().
+        Uses a double-checked lock so only one thread starts the load.
+        """
+        if self._load_started:
+            return
+        with self._load_lock:
+            if self._load_started:   # second check inside lock
+                return
+            self._load_started = True
+            self._init_models_bg()
 
     def _init_models_bg(self):
-        """Load heavy models in a background thread so startup stays fast."""
-        self.ml_error = None
+        """Load heavy models in a daemon background thread (non-blocking)."""
 
         def load():
-            # Sentence-Transformer
+            # SentenceTransformer
             try:
                 from sentence_transformers import SentenceTransformer, util
                 self.util     = util
                 self.embedder = SentenceTransformer("all-MiniLM-L6-v2")
-                print("[Classifier] SentenceTransformer loaded successfully.")
+                log.info("[Classifier] SentenceTransformer loaded successfully.")
             except Exception as e:
                 self.ml_error = f"SentenceTransformer failed: {e}"
-                print(f"[Classifier] WARNING: {self.ml_error} — heuristics only.")
+                log.warning(
+                    "[Classifier] SentenceTransformer unavailable (%s) — heuristics only.",
+                    e,
+                )
 
             # Scikit-Learn model
             if os.path.exists(self.model_path):
                 try:
+                    import joblib
                     artifacts  = joblib.load(self.model_path)
                     self.model = artifacts.get("model")
                     self.tfidf = artifacts.get("tfidf")
                     self.ml_ready = True
-                    print("[Classifier] ML model loaded successfully.")
+                    log.info("[Classifier] ML model loaded successfully.")
                 except Exception as e:
                     err = f"ML artifact load failed: {e}"
                     self.ml_error = (
-                        (self.ml_error + " | " + err) if self.ml_error else err
+                        f"{self.ml_error} | {err}" if self.ml_error else err
                     )
-                    print(f"[Classifier] WARNING: {err}")
+                    log.warning("[Classifier] %s", err)
             else:
-                msg = f"Model not found at {self.model_path}. Run train_model.py."
-                self.ml_error = (
-                    (self.ml_error + " | " + msg) if self.ml_error else msg
+                msg = (
+                    f"Model not found at {self.model_path}. "
+                    "Run train_model.py to generate it."
                 )
-                print(f"[Classifier] WARNING: {msg}")
+                self.ml_error = (
+                    f"{self.ml_error} | {msg}" if self.ml_error else msg
+                )
+                log.warning("[Classifier] %s", msg)
 
-        threading.Thread(target=load, daemon=True).start()
+        threading.Thread(target=load, name="focuslock-model-loader", daemon=True).start()
 
     def ml_status(self) -> dict:
         """Expose ML health state for /api/status and /api/profile."""
@@ -99,12 +126,16 @@ class FeatureClassifier:
         Output: feature dictionary consumed by the engine's decision layer.
 
         Pipeline (< 100 ms budget):
-          1. Whitelist / Blacklist overrides   (O(n) string scan)
-          2. Personalized heuristic pass        (UserProfile.get_all_weights)
-          3. Intent-aware scoring               (IntentProfile.score_activity)
-          4. Semantic embeddings fallback       (capped at budget remainder)
-          5. Confidence calibration
+          1. Lazy model load trigger
+          2. Whitelist / Blacklist overrides   (O(n) string scan)
+          3. Personalized heuristic pass        (UserProfile.get_all_weights)
+          4. Intent-aware scoring               (IntentProfile.score_activity)
+          5. Semantic embeddings fallback       (capped at budget remainder)
+          6. Confidence calibration
         """
+        # Step 1 — ensure models are loading (lazy, once)
+        self._ensure_loaded()
+
         start_time = time.time()
 
         title  = (state.get("title") or "").lower()
@@ -115,14 +146,12 @@ class FeatureClassifier:
         intent_key = intent_profile.intent_key if intent_profile else "global"
         full_text  = f"{title} {app} {url}"
 
-        # ── 1. Strict Overrides ───────────────────────────────────────────────
+        # ── 2. Strict Overrides ───────────────────────────────────────────────
         is_whitelist = any(w.lower() in full_text for w in (whitelist or []))
         is_blacklist = any(b.lower() in full_text for b in (blacklist or []))
 
-        # ── 2. Personalized Heuristic Pass ────────────────────────────────────
-        # Pull merged weights (base defaults + user-learned deltas) for this intent
-        concept_weights = user_profile.get_all_weights(intent_key)
-
+        # ── 3. Personalized Heuristic Pass ────────────────────────────────────
+        concept_weights  = user_profile.get_all_weights(intent_key)
         heuristic_score  = 0
         matched_concepts = []
 
@@ -131,7 +160,7 @@ class FeatureClassifier:
                 heuristic_score += weight
                 matched_concepts.append(concept)
 
-        # ── 3. Intent-Aware Scoring ───────────────────────────────────────────
+        # ── 4. Intent-Aware Scoring ───────────────────────────────────────────
         intent_boost      = 0
         negative_override = False
         intent_reason     = "No intent profile"
@@ -143,11 +172,9 @@ class FeatureClassifier:
             negative_override = result["negative_override"]
             intent_reason     = result["intent_reason"]
             intent_match      = intent_boost != 0
-
             heuristic_score  += intent_boost
-
         else:
-            # Legacy flat keyword boost (fallback when no IntentProfile supplied)
+            # Legacy flat keyword boost (fallback when no IntentProfile)
             intent_words = [w for w in intent.split() if len(w) > 3]
             for word in intent_words:
                 if word in full_text:
@@ -155,25 +182,25 @@ class FeatureClassifier:
                     intent_match     = True
             intent_reason = "Legacy intent keyword boost"
 
-        # ── 4. Semantic Embeddings Fallback ───────────────────────────────────
+        # ── 5. Semantic Embeddings Fallback (budget-capped) ───────────────────
         semantic_similarity = 0.0
         ml_prob             = 0.0
 
         if self.embedder is not None and self.util is not None:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(self._run_ml_pipeline, intent, full_text)
+                future      = executor.submit(self._run_ml_pipeline, intent, full_text)
                 elapsed_ms  = (time.time() - start_time) * 1000
                 budget_left = max(0.0, 100.0 - elapsed_ms) / 1000.0
                 try:
                     semantic_similarity, ml_prob = future.result(timeout=budget_left)
                 except concurrent.futures.TimeoutError:
-                    print("[Classifier] WARN: Budget exceeded — heuristics only.")
+                    log.debug("[Classifier] Budget exceeded — falling back to heuristics.")
 
-        # ── 5. Confidence Calibration ─────────────────────────────────────────
+        # ── 6. Confidence Calibration ─────────────────────────────────────────
         if is_whitelist or is_blacklist or negative_override:
             confidence = 100.0
         else:
-            confidence = 50.0  # neutral baseline
+            confidence = 50.0
 
             heur_sign = 1 if heuristic_score > 0 else (-1 if heuristic_score < 0 else 0)
             sem_sign  = (
@@ -189,7 +216,6 @@ class FeatureClassifier:
             if intent_match:
                 confidence = min(95.0, confidence + 20)
 
-            # Intent profile strength amplifies confidence further (more specific = more sure)
             if intent_profile and intent_profile.strength > 0.5:
                 confidence = min(98.0, confidence + 10 * intent_profile.strength)
 
@@ -218,21 +244,16 @@ class FeatureClassifier:
         self,
         app:           str,
         title:         str,
-        correct_label: str,   # "PRODUCTIVE" | "WARNING" | "DISTRACTION"
+        correct_label: str,
         intent_key:    str  = "global",
         manual:        bool = False,
     ):
         """
         Apply a real-time learning signal to the user profile.
-
         Layer 1 (auto):   called by engine on violation or session-end.
         Layer 2 (manual): called by engine on user thumbs-up/down feedback.
-
-        The concept learned is the app process name (normalised) so that
-        future classifications of the same app in the same intent context
-        get a personalized score immediately — no retraining required.
         """
-        concept   = (app or title or "").lower().strip().split(".")[0]  # strip .exe etc.
+        concept   = (app or title or "").lower().strip().split(".")[0]
         direction = "negative" if correct_label == "DISTRACTION" else "positive"
 
         if concept:
@@ -243,14 +264,14 @@ class FeatureClassifier:
                 manual     = manual,
             )
             action = "Manual" if manual else "Auto"
-            print(
-                f"[Classifier] {action} feedback → '{concept}' "
-                f"({direction}) in intent '{intent_key}'"
+            log.info(
+                "[Classifier] %s feedback → '%s' (%s) in intent '%s'",
+                action, concept, direction, intent_key,
             )
 
     # ── ML Pipeline (budget-capped) ───────────────────────────────────────────
 
-    def _run_ml_pipeline(self, intent: str, text: str):
+    def _run_ml_pipeline(self, intent: str, text: str) -> tuple[float, float]:
         """Runs SentenceTransformer + Scikit-Learn inside the 100 ms budget."""
         sim  = 0.0
         prob = 0.0
@@ -274,5 +295,5 @@ class FeatureClassifier:
         return sim, prob
 
 
-# Global singleton
+# ── Global Singleton ──────────────────────────────────────────────────────────
 classifier = FeatureClassifier()

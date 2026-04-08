@@ -259,3 +259,27 @@ timestamp,title,app,url,goal,mode,similarity,heuristic,confidence,label
 2026-03-24T23:17:26.535158,"(5) G-5. Breadth-First Search (BFS) | C++ and Java | Traversal Technique in Graphs - YouTube - Brave","brave.exe","","",standard,0.047,10,60.0,WARNING
 2026-03-24T23:17:27.043319,"(5) G-5. Breadth-First Search (BFS) | C++ and Java | Traversal Technique in Graphs - YouTube - Brave","brave.exe","","",standard,0.047,10,60.0,PRODUCTIVE
 2026-03-24T23:17:45.081703,"FocusLock | Cognitive Engine - Google Chrome","chrome.exe","","",standard,0.058,0,50.0,PRODUCTIVE
+2026-04-08T18:33:28.360048,"FocusLock | Cognitive Engine - Google Chrome","chrome.exe","","",standard,0,0,50.0,PRODUCTIVE
+2026-04-08T18:34:00.381485,"index.html - FocusLock - Visual Studio Code","Code.exe","","",standard,0,15,65.0,PRODUCTIVE
+2026-04-08T18:34:03.962592,"client.js - FocusLock - Visual Studio Code","Code.exe","","",standard,0,15,65.0,PRODUCTIVE
+2026-04-08T18:34:21.432219,"FocusLock | Cognitive Engine - Google Chrome","chrome.exe","","",standard,0,0,50.0,PRODUCTIVE
+2026-04-08T18:34:22.470275,"ChatGPT - Google Chrome","chrome.exe","","",standard,0.077,0,50.0,PRODUCTIVE
+2026-04-08T18:35:30.375361,"FocusLock | Cognitive Engine - Google Chrome","chrome.exe","","",standard,0.058,6,56.0,PRODUCTIVE
+2026-04-08T18:35:37.406423,"client.js - FocusLock - Visual Studio Code","Code.exe","","",standard,0,21,71.0,PRODUCTIVE
+2026-04-08T18:35:39.444488,"","explorer.exe","","",standard,0.047,0,50.0,PRODUCTIVE
+2026-04-08T18:35:40.475567,"ChatGPT - Google Chrome","chrome.exe","","",standard,0.077,6,56.0,PRODUCTIVE
+2026-04-08T18:35:41.508323,"FocusLock | Cognitive Engine - Google Chrome","chrome.exe","","",standard,0.058,6,56.0,PRODUCTIVE
+2026-04-08T18:35:43.537285,"ChatGPT - Google Chrome","chrome.exe","","",standard,0.077,6,56.0,WARNING
+2026-04-08T18:35:54.574449,"client.js - FocusLock - Visual Studio Code","Code.exe","","",standard,0,21,71.0,WARNING
+2026-04-08T18:35:56.611805,"ChatGPT - Google Chrome","chrome.exe","","",standard,0.077,6,56.0,WARNING
+2026-04-08T18:35:58.642253,"FocusLock | Cognitive Engine - Google Chrome","chrome.exe","","",standard,0.058,6,56.0,WARNING
+2026-04-08T18:36:14.681196,"404 Not Found - Google Chrome","chrome.exe","","",standard,0.022,6,56.0,WARNING
+2026-04-08T18:36:17.714489,"ChatGPT - Google Chrome","chrome.exe","","",standard,0.077,6,56.0,WARNING
+2026-04-08T18:36:18.749046,"client.js - FocusLock - Visual Studio Code","Code.exe","","",standard,0,21,71.0,WARNING
+2026-04-08T18:36:22.783082,"index.html - FocusLock - Visual Studio Code","Code.exe","","",standard,0.007,21,71.0,WARNING
+2026-04-08T18:36:28.816554,"ChatGPT - Google Chrome","chrome.exe","","",standard,0.077,6,56.0,WARNING
+2026-04-08T18:38:47.434958,"FocusLock | Cognitive Engine - Google Chrome","chrome.exe","","",deep,0.058,12,62.0,PRODUCTIVE
+2026-04-08T18:38:51.462901,"Settings - FocusLock - Visual Studio Code","Code.exe","","",deep,0,27,77.0,PRODUCTIVE
+2026-04-08T18:38:55.502434,"","explorer.exe","","",deep,0.047,6,56.0,PRODUCTIVE
+2026-04-08T18:38:56.533288,"Settings - FocusLock - Visual Studio Code","Code.exe","","",deep,0,27,77.0,PRODUCTIVE
+2026-04-08T18:39:13.569706,"run.spec - FocusLock - Visual Studio Code","Code.exe","","",deep,0,27,77.0,PRODUCTIVE

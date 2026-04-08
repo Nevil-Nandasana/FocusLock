@@ -1,18 +1,73 @@
+"""
+FocusLock — Flask Application Entry Point
+==========================================
+Production-grade startup:
+  • setup_logging() called FIRST — all subsequent modules log to focuslock.log
+  • No subprocess.run(train_model) — training is triggered in background by LearningManager
+  • SECRET_KEY from environment (secure random fallback for dev)
+  • debug mode env-controlled via FLASK_DEBUG=1
+  • Optional API key middleware (FOCUSLOCK_API_KEY env var)
+"""
+
+import os
+import sys
+
+# ── Bootstrap logging BEFORE any other import ────────────────────────────────
+# This ensures every subsequent module's logging.getLogger() calls route to
+# our RotatingFileHandler. Order matters — do NOT move this block.
+from backend.logger import setup_logging
+
+_debug_mode = os.environ.get("FLASK_DEBUG", "0") == "1"
+setup_logging(debug=_debug_mode)
+
+import logging
+log = logging.getLogger(__name__)
+
+# ── Flask app ──────────────────────────────────────────────────────────────────
 from flask import Flask, render_template, request, jsonify, make_response
 from backend.engine import FocusEngine
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+
+# Secret key — required for session cookies; pulled from env in production
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.urandom(24)
+
 engine = FocusEngine()
 
-# Bug #14 (partial): Add CORS headers for Flutter/web frontend compatibility.
-# For production, replace with flask-cors + auth + rate limiting.
+# Optional API key for protecting the /api/* endpoints from other local processes.
+# Set FOCUSLOCK_API_KEY in the environment to enable. Leave unset (dev default) to disable.
+_API_KEY = os.environ.get("FOCUSLOCK_API_KEY")
+
+
+# ── Security Middleware ───────────────────────────────────────────────────────
+
+@app.before_request
+def check_api_key():
+    """
+    If FOCUSLOCK_API_KEY is set, require X-API-KEY header on all /api/* routes.
+    Browser preflight (OPTIONS) and UI routes are always allowed.
+    """
+    if request.method == "OPTIONS":
+        return
+    if not request.path.startswith("/api/"):
+        return
+    if not _API_KEY:
+        return   # key not configured → open (development mode)
+    if request.headers.get("X-API-KEY") != _API_KEY:
+        log.warning("[run] Unauthorized API request from %s to %s",
+                    request.remote_addr, request.path)
+        return jsonify({"error": "Unauthorized"}), 401
+
+
 @app.after_request
 def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Origin"]  = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-KEY"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
 
+
+# ── UI Routes ─────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
@@ -22,11 +77,11 @@ def index():
 @app.route("/analytics")
 def analytics():
     from backend.store import EventStore
-    store = EventStore()
+    store  = EventStore()
     events = store.get_events()
 
-    total = sum(1 for e in events if e["type"] == "SESSION_START")
-    broken = sum(1 for e in events if e["type"] == "SESSION_BROKEN")
+    total     = sum(1 for e in events if e["type"] == "SESSION_START")
+    broken    = sum(1 for e in events if e["type"] == "SESSION_BROKEN")
     predicted = sum(1 for e in events if e["type"] == "FAILURE_PREDICTED")
 
     rate = 0 if total == 0 else int(((total - broken) / total) * 100)
@@ -37,20 +92,20 @@ def analytics():
         total_sessions=total,
         failures=broken,
         success_rate=rate,
-        predicted=predicted
+        predicted=predicted,
     )
 
+
+# ── API Routes ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/start", methods=["POST"])
 def api_start():
     data = request.json or {}
 
-    # Bug #2 Fix: Validate that duration is present
     duration = data.get("duration")
     if duration is None:
         return jsonify({"error": "duration is required"}), 400
 
-    # Bug #8 Fix: Reject invalid range (must be 1-1440 minutes i.e. 1 min to 24 hours)
     try:
         duration = int(duration)
     except (TypeError, ValueError):
@@ -58,7 +113,6 @@ def api_start():
     if duration <= 0 or duration > 1440:
         return jsonify({"error": "duration must be between 1 and 1440 minutes"}), 400
 
-    # Handle whitelist/blacklist as either arrays or comma-separated strings
     wl = data.get("whitelist", [])
     bl = data.get("blacklist", [])
     if isinstance(wl, str):
@@ -71,14 +125,15 @@ def api_start():
         data.get("mode", "deep"),
         whitelist=wl,
         blacklist=bl,
-        intent=data.get("intent", "")
+        intent=data.get("intent", ""),
     )
+    log.info("[run] Session started — duration=%d mode=%s", duration, data.get("mode", "deep"))
     return jsonify({"status": "started"})
 
 
 @app.route("/api/continue", methods=["POST"])
 def api_continue():
-    data = request.json
+    data    = request.json
     success = engine.extend_session(data.get("duration", 10))
     return jsonify({"status": "extended" if success else "failed"})
 
@@ -86,6 +141,7 @@ def api_continue():
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
     success = engine.stop_session()
+    log.info("[run] Session stopped — success=%s", success)
     return jsonify({"status": "stopped" if success else "failed"})
 
 
@@ -133,41 +189,33 @@ def api_integrity():
 def api_feedback():
     """
     Layer 2 manual feedback — user corrects a classification.
-    Triggers real-time weight update (apply_manual_feedback) AND persists to logger.
     Body: { "label": "PRODUCTIVE"|"DISTRACTION", "app": "...", "title": "...",
             "log_id": "...", "comment": "..." }
     """
     from backend.logger import logger
     data  = request.json or {}
     label = data.get("label", "")
-    app   = data.get("app",   "")
+    app_  = data.get("app",   "")
     title = data.get("title", "")
 
-    # ── Layer 2: real-time weight correction ──────────────────────────────────
-    if label in ("PRODUCTIVE", "DISTRACTION") and (app or title):
-        engine.apply_manual_feedback(app=app, title=title, correct_label=label)
+    if label in ("PRODUCTIVE", "DISTRACTION") and (app_ or title):
+        engine.apply_manual_feedback(app=app_, title=title, correct_label=label)
 
-    # ── Persist feedback for offline retraining ───────────────────────────────
     logger.log_user_feedback(
         log_id        = data.get("log_id", ""),
         correct_label = label,
         comment       = data.get("comment", ""),
     )
-    return jsonify({"status": "saved", "applied": bool(label and (app or title))})
+    return jsonify({"status": "saved", "applied": bool(label and (app_ or title))})
 
 
 @app.route("/api/profile")
 def api_profile():
     """
     Expose the current user profile and ML health state.
-    Useful for debugging learned weights and intent parsing during development.
-    Returns:
-      profile       — per-intent weight deltas and metadata
-      ml_status     — model load health
-      intent_profile — parsed intent for the current session (if active)
     """
     from backend.user_profile import user_profile
-    from backend.classifier  import classifier as clf
+    from backend.classifier   import classifier as clf
 
     profile_data = user_profile.get_summary()
 
@@ -180,7 +228,7 @@ def api_profile():
             "goal_verb":        ip.goal_verb,
             "goal_subject":     ip.goal_subject,
             "strength":         ip.strength,
-            "positive_signals": ip.positive_signals[:10],   # trim for readability
+            "positive_signals": ip.positive_signals[:10],
             "negative_signals": ip.negative_signals[:10],
         }
 
@@ -191,22 +239,22 @@ def api_profile():
     })
 
 
+# ── Entry Point ────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    import os
-    import subprocess
     import webbrowser
     import time
     from threading import Thread
 
-    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
-        print("Starting FocusLock... Training model first.")
-        subprocess.run(["python", "backend/train_model.py"], check=True)
-        print("Model trained. Starting Web Server...")
+    log.info("[run] FocusLock starting — debug=%s", _debug_mode)
 
+    # Open browser only on the main process (not Werkzeug's reloader child)
+    if os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         def open_browser():
             time.sleep(1.5)
             webbrowser.open("http://127.0.0.1:5000/")
+            log.info("[run] Browser opened.")
 
         Thread(target=open_browser, daemon=True).start()
 
-    app.run(debug=True)
+    app.run(debug=_debug_mode, use_reloader=_debug_mode)
