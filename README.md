@@ -1,84 +1,150 @@
-# FocusLock
-**Authority over your own mind.**
+# 🧠 FocusLock — Intent-Aware Cognitive Behavior Engine
 
-FocusLock is a **behavior enforcement system for deep work**.  
-It replaces motivation with **rules, accountability, and server-side authority**.
-
-This is **not** a Pomodoro timer.  
-FocusLock treats focus as a **contract** — once started, it cannot be casually abandoned without consequence.
+FocusLock is an AI-powered productivity system that goes beyond traditional app blockers.
+Instead of blocking apps blindly, it analyzes **user intent, activity context, and behavioral patterns** to determine whether a user is truly distracted or still aligned with their goal.
 
 ---
 
-## 🆕 What's New (v3.0 Cognitive Engine Redesign)
+## 🚀 Problem
 
-### 🧠 True Cognitive Behavior Engine
-- **Decoupled Architecture**: Strict separation of concerns (Monitor -> Feature Classifier -> Decision Engine). The system now treats raw events, extracts semantic features, and processes state cleanly without logic cross-contamination.
-- **Hybrid AI Pipeline**: Fast heuristic passes mapped to a `<100ms` strict execution budget. If context is ambiguous, the system naturally falls back to `SentenceTransformers` embeddings.
-- **Drift Detection & Awareness**: The system now distinguishes between a 10-second necessary task switch and a scrolling binge. Frequent window switching triggers a gentle `WARNING` overlay before locking down.
+Most productivity tools rely on static rules:
 
-### 🎨 Glassmorphism & UI Overhaul
-- **Premium Glassmorphism Design System**: Frosted glass panels, dynamic floating ambient orbs, and layered visual depth.
-- **Activity Tracker & Confidence Gauges**: Real-time telemetry exposes exactly what the AI engine thinks of your active window, including Semantic Match and Confidence scores.
-- **Custom Modals (No More OS Alerts)**: Distractions and warning drifts are handled by beautifully animated, non-intrusive edge glows or in-app modals.
+* Block Instagram ❌
+* Allow VS Code ✅
 
-### 🏆 Gamified Authority
-- **Offline-Resilient Event Sourcing**: Every state transition (Pause, Extend, Complete) is cryptographically locked in a SQLite chain.
-- **Accurate Progression Logging**: Time extensions (`SESSION_EXTEND`) correctly yield XP scaling.
+This fails because:
+
+* YouTube can be educational
+* Google can lead to distractions
+* Context matters more than the platform
 
 ---
 
-## 🧠 Core Philosophy
+## 💡 Solution
 
-### System > User
-The system is the authority. User actions are *requests*, not commands.
+FocusLock introduces an **Intent Alignment Engine** that evaluates:
 
-### Time Is Sacred
-All timing is enforced **server-side**. The client never controls the actual time state.
+* What the user is trying to do (goal)
+* What they are currently doing (activity)
+* How they are behaving (switching patterns, time spent)
 
-### History Is Truth
-All behavior is recorded as **append-only events**. No silent edits. No state overwrites.
+It then classifies activity as:
 
----
-
-## 🚀 Features
-
-- **Event-Driven AI Alignment Engine**  
-  Monitors foreground windows and evaluates the contextual distance between the user's intended goal and their actual screen utilizing a hybrid heuristic-ML pipeline.
-- **Drift Detection & Cooldown Interventions**  
-  Provides soft intervention warnings (`WARNING` state) to snap the user back prior to registering definitive Focus Violations (`DISTRACTION` state).
-- **Server-Authoritative Focus Sessions**  
-  Sessions are strictly enforced by the python backend.
-- **Cryptographic Event Chain**  
-  Every event (`START`, `FOCUS_VIOLATION`, `PAUSED`) is hashed (SHA-256) and appended securely.
-- **Data & Logging Pipeline**  
-  Maintains structured logs (`backend/data/activity_log.jsonl`) and tracks ML training frames to continually augment the model over time.
+* ✅ PRODUCTIVE
+* ⚠️ NEUTRAL
+* ❌ DISTRACTION
 
 ---
 
-## 🏗 Architecture Overview
+## 🧠 Core Features
 
-### Backend — Event Driven Engine Layer
-- **Language/Framework**: Python 3 & Flask
-- **Data Layers**: Local SQLite & JSON Feature stores
-- **Pipeline Components**:
-  - `monitor.py` (Data Extractor via `psutil` / Windows API)
-  - `classifier.py` (NLP & Scikit-Learn Feature Generator)
-  - `engine.py` (State Machine & Drift Decision)
-  
-The backend acts as the immutable arbiter of focus states, tracking time, applying session penalties, and orchestrating the AI evaluations.
+### 🎯 Intent-Based Classification
 
-### Frontend — Execution & Rendering Layer
-- Web Client / Flask Templates
-- Vanilla CSS featuring CSS Variables and Backdrop-Filters
-- Vanilla JS (Polling the API)
+Determines productivity based on **semantic alignment with user goals**, not just app names.
 
-*(Also supports external client implementations like Flutter via the standard JSON API).*
+---
+
+### ⚡ Hybrid Intelligence Engine
+
+Combines:
+
+* Heuristic scoring (fast)
+* Semantic similarity (context-aware)
+* Behavioral signals (drift detection)
+
+---
+
+### 🔄 Drift Detection
+
+Detects loss of focus using:
+
+* Rapid app switching
+* Short attention bursts
+
+---
+
+### 📊 Real-Time Telemetry
+
+Displays:
+
+* Active application
+* Confidence score
+* Semantic alignment
+
+---
+
+### 🧊 Glassmorphism UI
+
+Modern interface with:
+
+* Blurred glass panels
+* Soft gradients
+* State-based visual feedback
+
+---
+
+## 🏗 Architecture
+
+FocusLock follows a clean, event-driven architecture:
+
+```
+Monitor Layer
+   ↓
+Context Builder
+   ↓
+Feature Generator (Hybrid Engine)
+   ↓
+Decision Engine (State + Drift + Confidence)
+   ↓
+Intervention Layer
+   ↓
+UI Layer
+   ↓
+Feedback & Logging
+```
+
+---
+
+## ⚙️ How It Works
+
+1. The system monitors the active window
+2. Extracts context (title, app)
+3. Computes:
+
+   * heuristic score
+   * semantic similarity
+4. Applies behavioral logic:
+
+   * time spent
+   * switching frequency
+5. Produces:
+
+   * classification
+   * confidence score
+6. UI reacts with:
+
+   * soft warnings
+   * drift indicators
+   * alerts (if needed)
+
+---
+
+## 🧪 Example Scenario
+
+**Goal:** Prepare for Amazon SDE interview
+
+| Activity                | Result            |
+| ----------------------- | ----------------- |
+| YouTube (DSA tutorial)  | ✅ PRODUCTIVE      |
+| Medium (interview blog) | ✅ PRODUCTIVE      |
+| Instagram Reels         | ❌ DISTRACTION     |
+| Rapid tab switching     | ⚠️ DRIFT DETECTED |
 
 ---
 
 ## 📂 Project Structure
 
-```text
+```
 focuslock/
 │
 ├── backend/
@@ -107,51 +173,47 @@ focuslock/
 
 ---
 
-## ▶️ Running FocusLock
+## 📊 Logging & Feedback
 
-### 1️⃣ Prerequisites
-- **Python 3.9+**
-- (Windows OS recommended for native Win32 window-tracking API compatibility)
+FocusLock logs structured activity data:
 
-### 2️⃣ Install Dependencies
-```bash
-pip install flask sentence-transformers scikit-learn numpy psutil joblib
 ```
-*(Note: `ctypes` is standard in Python; you do not need to install `pywin32`)*
-
-### 3️⃣ Start the Application
-To run the server and UI organically:
-```bash
-python run.py
+[time] app → score → classification → confidence
 ```
-> The system will automatically execute the dataset generator (if missing) and open your default web browser to the Glassmorphism application located at `http://127.0.0.1:5000`.
 
-### 🖥 UI Troubleshooting
-If your browser displays the legacy `00:00` plain black screen, ensure you **hard-refresh your browser (Ctrl+Shift+R)** to clear the cache and load the new v3.0 Glassmorphism overlays.
+User corrections are stored to improve future predictions.
 
 ---
 
-## 🔐 System Rules (Non-Negotiable)
+## ⚡ Performance
 
-* You cannot start a new session if one is already active.
-* You cannot end a session silently.
-* All failures are logged permanently in the SQLite chain.
-* The system’s decision classification is final.
-
-Deleting the database is equivalent to **resetting your discipline history**.
+* Hybrid pipeline ensures fast execution
+* Target latency: < 100ms per evaluation
+* Embeddings used only when necessary
 
 ---
 
-## 🧑‍💻 Contributors
+## 🔮 Future Improvements
 
-* **Nitin**
-* **Nevil**
+* Personalized learning models
+* Cross-device tracking
+* Reinforcement learning from behavior
+* Better semantic understanding
 
 ---
 
-## ⚠️ Disclaimer
+## 🧠 Key Insight
 
-FocusLock is intentionally strict.
+FocusLock is not a blocker.
 
-If you are looking for gentle reminders, flexible timers, or motivational quotes...
-**This system is not for you.**
+It is a **real-time cognitive alignment system** that asks:
+
+> “Is this activity aligned with what you intended to do?”
+
+---
+
+## 👨‍💻 Author
+
+Built as a system design + AI project focusing on real-world productivity challenges.
+
+---

@@ -13,13 +13,18 @@
     <!-- ────────── VANTA.JS NET BACKGROUND ────────── -->
     <div id="vanta-bg"></div>
 
-    <!-- ────────── HARD DISTRACTION OVERLAY ────────── -->
+    <!-- ────────── HARD DISTRACTION OVERLAY (RECOVERY SYSTEM) ────────── -->
     <div id="violation-overlay" class="danger-overlay hidden">
         <div class="glass-card overlay-panel state-danger overlay-center">
-            <span class="overlay-icon">🚫</span>
-            <h1 class="title text-danger">Distraction Blocked</h1>
-            <p class="text-muted" style="margin: 1rem 0 0.5rem;">Close the unauthorized window to resume your session.</p>
+            <span class="overlay-icon" style="font-size: 3.5rem;">⛔</span>
+            <h1 class="title text-danger">You’ve drifted from your goal</h1>
+            <p class="text-muted" style="margin: 1rem 0 0.5rem;">This activity doesn’t align with your current focus session.</p>
             <div id="distraction-reason" class="mono reason-box">Analyzing...</div>
+            
+            <div style="display: flex; gap: 1rem; margin-top: 1.8rem; width: 100%;">
+                <button id="btn-recovery-return" class="glass-button glow-purple" style="flex: 1; padding: 12px; border-color: var(--primary);">Return to Focus</button>
+                <button id="btn-recovery-ignore" class="glass-button" style="flex: 1; padding: 12px; background: transparent; border-color: rgba(255,255,255,0.08);">Ignore (continue anyway)</button>
+            </div>
         </div>
     </div>
 

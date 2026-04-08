@@ -38,6 +38,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const confirmBreakBtn = document.getElementById('btn-confirm-break');
     const cancelBreakBtn = document.getElementById('btn-cancel-break');
     const breakInput = document.getElementById('break-excuse-input');
+    const btnRecoveryReturn = document.getElementById('btn-recovery-return');
+    const btnRecoveryIgnore = document.getElementById('btn-recovery-ignore');
 
     // Mode selector
     let selectedMode = "deep";
@@ -132,6 +134,19 @@ document.addEventListener('DOMContentLoaded', () => {
         checkStatus();
     });
 
+    // ─── Recovery Flow ───
+    btnRecoveryReturn?.addEventListener('click', async () => {
+        violationOverlay?.classList.add('hidden');
+        await fetch('/api/recovery/correct', { method: 'POST' });
+        checkStatus();
+    });
+
+    btnRecoveryIgnore?.addEventListener('click', async () => {
+        violationOverlay?.classList.add('hidden');
+        await fetch('/api/recovery/ignore', { method: 'POST' });
+        checkStatus();
+    });
+
     // ─── Completion Flow ───
     btnContinue?.addEventListener('click', async () => {
         await fetch('/api/continue', {
@@ -184,6 +199,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state === "PRODUCTIVE") mainContainer?.classList.add('focus-animate');
         if (state === "WARNING") mainContainer?.classList.add('state-drift');
         if (state === "DISTRACTION") mainContainer?.classList.add('state-danger');
+        
+        if (status.recovery_active) {
+            violationOverlay?.classList.remove('hidden');
+            if (distReason && status.recovery_snapshot) {
+                distReason.textContent = status.recovery_snapshot.reason || "Distraction detected.";
+            }
+        } else {
+            violationOverlay?.classList.add('hidden');
+        }
 
         localRemaining = status.remaining;
         renderTime(localRemaining);
@@ -220,13 +244,17 @@ document.addEventListener('DOMContentLoaded', () => {
         sessionActiveView.classList.add('hidden');
 
         const s = status.summary;
+        const d = s.total_distractions || 0;
+        const c = s.corrected_distractions || 0;
+        const rRate = d > 0 ? Math.round((c / d) * 100) : 100;
+        const confRate = Math.max(0, 100 - (d * 5));
 
         completionDesc.textContent = `
 Duration: ${s.duration} mins
-Mode: ${s.mode}
 Goal: ${s.intent || 'None'}
 Violations: ${s.violations}
-Penalties: ${s.penalties}s
+Distractions: ${d} (Recovery: ${rRate}%)
+Focus Consistency: ${confRate}%
 XP Earned: ${status.user_stats?.xp || 0}
         `;
 

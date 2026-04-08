@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from .store            import EventStore
 from .monitor          import WindowMonitor
 from .classifier       import classifier as clf
+from .context_builder  import build_context
 from .logger           import logger
 from .intent_engine    import intent_engine, IntentProfile
 from .user_profile     import user_profile
@@ -63,6 +64,14 @@ class FocusEngine:
         self.alert_cooldown       = 10
 
         self.last_classified_state = None
+
+        # Recovery Tracking
+        self.recovery_active = False
+        self.recovery_snapshot = None
+        self.last_intervention_timestamp = 0
+        self.session_distractions = 0
+        self.session_ignored = 0
+        self.session_corrected = 0
 
         # Drift tracking
         self.recent_switches = []
@@ -118,6 +127,11 @@ class FocusEngine:
         self.current_state         = "PRODUCTIVE"
         self.session_productive_apps = []
         self.session_violated_apps   = []
+        self.session_distractions    = 0
+        self.session_ignored         = 0
+        self.session_corrected       = 0
+        self.recovery_active         = False
+        self.recovery_snapshot       = None
 
         # ── Parse intent once — used for every classification this session ────
         self._parse_intent(intent)
@@ -174,126 +188,135 @@ class FocusEngine:
             return
 
         now = time.time()
+        
+        # 0. Context Builder
+        context = build_context(raw_state)
 
-        # 1. Drift tracking (time-decayed, thread-safe)
+        # 1. Drift tracking (Independent Behavior State)
         with self._lock:
             self.recent_switches.append(now)
             self.recent_switches = [
                 t for t in self.recent_switches if now - t <= DRIFT_WINDOW_SEC
             ]
-            is_drifting = len(self.recent_switches) > DRIFT_THRESHOLD
+            switches = len(self.recent_switches)
+            behavior_state = "DRIFT" if switches > 5 else "NORMAL"
 
-        # 2. Extract features (personalized + intent-aware)
+        # 2. Extract features
         features = clf.extract_features(
-            state          = raw_state,
+            context        = context,
             intent         = session.get("intent", ""),
             mode           = session.get("mode", "deep"),
             whitelist      = session.get("whitelist", []),
             blacklist      = session.get("blacklist", []),
-            intent_profile = self.intent_profile,   # ← structured intent
+            intent_profile = self.intent_profile,
         )
 
-        # 3. Decision logic
-        new_state = "PRODUCTIVE"
-        reason    = "Aligned"
-        confidence = features["confidence"]
+        confidence = features.get("confidence", 0)
+        h_score    = features.get("heuristic_score", 0)
 
-        if features["whitelist_match"]:
-            new_state = "PRODUCTIVE"
-            reason    = "Whitelist match"
-        elif features["blacklist_match"]:
-            new_state = "DISTRACTION"
-            reason    = "Blacklist match"
+        # 3. Decision Logic (Classification)
+        classification = "NEUTRAL"
+        reason         = "Ambiguous"
+
+        if features.get("whitelist_match"):
+            classification = "PRODUCTIVE"
+            reason         = "Whitelist match"
+        elif features.get("blacklist_match"):
+            classification = "DISTRACTION"
+            reason         = "Blacklist match"
         elif features.get("negative_override"):
-            # Intent engine detected a hard anti-intent signal
-            new_state = "DISTRACTION"
-            reason    = features.get("intent_reason", "Anti-intent app")
+            classification = "DISTRACTION"
+            reason         = "Anti-intent app"
         else:
-            h_score = features["heuristic_score"]
             if h_score < -15:
-                if confidence < 75:
-                    new_state = "WARNING"
-                    reason    = "Low-confidence distraction"
-                else:
-                    new_state = "DISTRACTION"
-                    reason    = "Distraction detected"
+                classification = "DISTRACTION"
+                reason         = "Distraction detected"
             elif h_score > 15:
-                new_state = "PRODUCTIVE"
-                reason    = features.get("intent_reason", "Aligned")
+                classification = "PRODUCTIVE"
+                reason         = "Aligned"
+
+        # 4. Confidence Handling & Escalation
+        final_state = classification
+        if classification == "DISTRACTION":
+            if confidence > 75:
+                final_state = "DISTRACTION"
+            elif confidence >= 50:
+                final_state = "WARNING"
+                reason = "Soft warning: " + reason
             else:
-                new_state = "PRODUCTIVE"  # ambiguous → productive by default
+                final_state = "NEUTRAL"
+                reason = "Ignored (low confidence)"
 
-        if is_drifting and new_state == "PRODUCTIVE":
-            new_state = "WARNING"
-            reason    = "Drift detected (frequent switching)"
+        if final_state == "PRODUCTIVE" and behavior_state == "DRIFT":
+            final_state = "WARNING"
+            reason = "Drifting behavior"
 
-        # 4. FSM enforcement
+        # 5. State updates
         with self._lock:
-            allowed = ALLOWED_TRANSITIONS.get(self.current_state, [])
-            if new_state not in allowed:
-                new_state = self.current_state  # snap to legal state
-
-            self.last_state        = self.current_state
-            self.current_state     = new_state
+            self.last_state = self.current_state
+            self.current_state = final_state
             self.last_classified_state = {
                 "app":      raw_state.get("app", ""),
                 "title":    raw_state.get("title", ""),
-                "state":    new_state,
+                "state":    final_state,
+                "classification": classification,
+                "behavior": behavior_state,
                 "features": features,
                 "reason":   reason,
             }
-            last_alert_snapshot = self.last_alert_time
+            last_intervention = self.last_intervention_timestamp
 
-        # 5. Track apps for end-of-session auto-learning
+        # Track apps for end-of-session auto-learning
         app_name = (raw_state.get("app") or "").lower().split(".")[0]
         if app_name:
             with self._lock:
-                if new_state == "PRODUCTIVE" and app_name not in self.session_productive_apps:
+                if final_state == "PRODUCTIVE" and app_name not in self.session_productive_apps:
                     self.session_productive_apps.append(app_name)
-                elif new_state == "DISTRACTION" and app_name not in self.session_violated_apps:
+                elif final_state == "DISTRACTION" and app_name not in self.session_violated_apps:
                     self.session_violated_apps.append(app_name)
 
-        # 6. Intervention + cooldown layer
-        if self.current_state != "PRODUCTIVE":
-            if (
-                self.current_state != self.last_state
-                or (now - last_alert_snapshot) > self.alert_cooldown
-            ):
-                with self._lock:
-                    self.last_alert_time = now
-                if self.current_state == "DISTRACTION":
-                    self.register_violation(f"DISTRACTION: {reason}")
-                    # Layer 1 auto-learning: immediate negative signal on violation
-                    clf.apply_session_feedback(
-                        app           = raw_state.get("app", ""),
-                        title         = raw_state.get("title", ""),
-                        correct_label = "DISTRACTION",
-                        intent_key    = self.intent_profile.intent_key
-                                        if self.intent_profile else "global",
-                        manual        = False,
-                    )
+        # 6. Cooldown + Escalation Layer
+        if final_state == "DISTRACTION":
+            with self._lock:
+                if (now - last_intervention) > 10:
+                    self.last_intervention_timestamp = now
+                    
+                    self.recovery_active = True
+                    self.recovery_snapshot = {
+                        "app": raw_state.get("app", ""),
+                        "title": raw_state.get("title", ""),
+                        "reason": reason
+                    }
+                    
+                    try:
+                        from backend.window_utils import focus_focuslock
+                        focus_focuslock()
+                    except Exception:
+                        pass
+                        
+                    self.session_distractions += 1
 
-        # 7. Logging
+                    self.register_violation(f"DISTRACTION: {reason}")
+                    
+                    if self.intent_profile:
+                        clf.apply_session_feedback(
+                            app           = raw_state.get("app", ""),
+                            title         = raw_state.get("title", ""),
+                            correct_label = "DISTRACTION",
+                            intent_key    = self.intent_profile.intent_key,
+                            manual        = False,
+                        )
+
+        # 7. Logging (Refined format)
         logger.log_activity(
             timestamp      = datetime.now().isoformat(),
             title          = raw_state.get("title", ""),
             app            = raw_state.get("app", ""),
-            url            = raw_state.get("url", ""),
-            features       = features,
-            classification = self.current_state,
-            reason         = reason,
-        )
-
-        logger.log_training_row(
-            title      = raw_state.get("title", ""),
-            app        = raw_state.get("app", ""),
-            url        = raw_state.get("url", ""),
-            goal       = session.get("intent", ""),
-            mode       = session.get("mode", "deep"),
-            similarity = features["semantic_similarity"],
-            heuristic  = features["heuristic_score"],
-            confidence = features["confidence"],
-            label      = self.current_state,
+            similarity     = features.get("semantic_similarity", 0),
+            heuristic      = features.get("heuristic_score", 0),
+            confidence     = features.get("confidence", 0),
+            classification = classification,
+            behavior       = behavior_state
         )
 
     # ── Status ────────────────────────────────────────────────────────────────
@@ -341,6 +364,9 @@ class FocusEngine:
                     "intent":     session.get("intent", "None"),
                     "intent_key": session.get("intent_key", "global"),
                     "streak":     session.get("streak", 1),
+                    "total_distractions": self.session_distractions,
+                    "ignored_distractions": self.session_ignored,
+                    "corrected_distractions": self.session_corrected,
                 },
                 "user_stats": self.store.get_user_stats(),
             }
@@ -356,6 +382,8 @@ class FocusEngine:
             "prediction":        prediction,
             "paused":            self.is_paused,
             "current_state":     self.current_state,
+            "recovery_active":   self.recovery_active,
+            "recovery_snapshot": self.recovery_snapshot,
             "activity_snapshot": self.last_classified_state,
             "streak":            session.get("streak", 1),
             "intent_profile": {

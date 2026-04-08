@@ -117,21 +117,29 @@ class FocusLogger:
         timestamp: str,
         title: str,
         app: str,
-        url: str,
-        features: dict,
+        similarity: float,
+        heuristic: float,
+        confidence: float,
         classification: str,
-        reason: str,
+        behavior: str,
     ):
         """Append one classification event to today's JSONL activity log."""
         entry = {
-            "timestamp":      timestamp,
+            "time":           timestamp,
             "title":          title,
             "app":            app,
-            "url":            url,
-            "features":       features,
+            "similarity":     similarity,
+            "heuristic":      heuristic,
+            "confidence":     confidence,
             "classification": classification,
-            "reason":         reason,
+            "behavior":       behavior,
         }
+        
+        # Log to Python logging stream cleanly
+        self._log.info(
+            f"[{behavior}] {classification} (Conf: {confidence} | Sim: {similarity} | Heur: {heuristic}) -> {app}: {title}"
+        )
+        
         try:
             with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")

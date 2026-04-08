@@ -2,11 +2,12 @@
   "global": {
     "chrome": 9,
     "code": 9,
-    "explorer": 6
+    "explorer": 6,
+    "brave": -12
   },
   "_meta": {
     "total_sessions": 6,
     "intent_aliases": {},
-    "last_updated": "2026-04-08T18:40:03.289297"
+    "last_updated": "2026-04-08T19:46:58.424563"
   }
 }

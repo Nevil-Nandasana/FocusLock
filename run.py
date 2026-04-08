@@ -179,6 +179,26 @@ def api_break():
     return jsonify({"status": "broken"})
 
 
+@app.route("/api/recovery/correct", methods=["POST"])
+def api_recovery_correct():
+    from backend.window_utils import try_close_active_window
+    engine.recovery_active = False
+    if hasattr(engine, 'session_corrected'):
+        engine.session_corrected += 1
+    
+    # FocusLock tries to close the distracting active window
+    try_close_active_window()
+    return jsonify({"status": "corrected"})
+
+
+@app.route("/api/recovery/ignore", methods=["POST"])
+def api_recovery_ignore():
+    engine.recovery_active = False
+    if hasattr(engine, 'session_ignored'):
+        engine.session_ignored += 1
+    return jsonify({"status": "ignored"})
+
+
 @app.route("/api/integrity")
 def api_integrity():
     valid, message = engine.store.verify_integrity()
