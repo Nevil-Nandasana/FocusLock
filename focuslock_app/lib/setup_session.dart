@@ -8,21 +8,35 @@ class SetupSessionScreen extends StatefulWidget {
   const SetupSessionScreen({super.key});
 
   @override
-  _SetupSessionScreenState createState() => _SetupSessionScreenState();
+  State<SetupSessionScreen> createState() => _SetupSessionScreenState();
 }
 
 class _SetupSessionScreenState extends State<SetupSessionScreen> {
   double _duration = 25;
   String _selectedCategory = 'Coding';
+  String _selectedMode = 'deep';
   final TextEditingController _whitelistController = TextEditingController();
+  final TextEditingController _blacklistController = TextEditingController();
 
   final List<String> categories = [
     'Studying', 'Coding', 'Interview Preparation', 'Research', 
     'Writing', 'Reading', 'Learning Course', 'Work Task', 'Deep Work'
   ];
 
+  @override
+  void dispose() {
+    _whitelistController.dispose();
+    _blacklistController.dispose();
+    super.dispose();
+  }
+
   void _startSession() async {
     final whitelist = _whitelistController.text.split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    final blacklist = _blacklistController.text
+        .split(',')
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toList();
@@ -35,10 +49,10 @@ class _SetupSessionScreenState extends State<SetupSessionScreen> {
 
     final success = await ApiService.startSession(
       duration: _duration.toInt(),
-      mode: 'deep',
+      mode: _selectedMode,
       intent: _selectedCategory,
       whitelist: whitelist,
-      blacklist: [],
+      blacklist: blacklist,
     );
 
     if (!mounted) return;
@@ -124,6 +138,43 @@ class _SetupSessionScreenState extends State<SetupSessionScreen> {
                   ),
                   const SizedBox(height: 32),
                   Text(
+                    'Session Mode',
+                    style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ChoiceChip(
+                          label: Text('Deep', style: GoogleFonts.inter(color: _selectedMode == 'deep' ? Colors.white : Colors.white70)),
+                          selected: _selectedMode == 'deep',
+                          selectedColor: const Color(0xFF6366F1),
+                          backgroundColor: Colors.white12,
+                          onSelected: (selected) {
+                            if (selected) {
+                              setState(() => _selectedMode = 'deep');
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ChoiceChip(
+                          label: Text('Standard', style: GoogleFonts.inter(color: _selectedMode == 'standard' ? Colors.white : Colors.white70)),
+                          selected: _selectedMode == 'standard',
+                          selectedColor: const Color(0xFF6366F1),
+                          backgroundColor: Colors.white12,
+                          onSelected: (selected) {
+                            if (selected) {
+                              setState(() => _selectedMode = 'standard');
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  Text(
                     'Whitelist Keywords (optional)',
                     style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
                   ),
@@ -135,6 +186,25 @@ class _SetupSessionScreenState extends State<SetupSessionScreen> {
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
                         hintText: 'e.g., stackoverflow, docs, github',
+                        hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Blacklist Keywords (optional)',
+                    style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  const SizedBox(height: 16),
+                  GlassCard(
+                    padding: const EdgeInsets.all(8),
+                    child: TextField(
+                      controller: _blacklistController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'e.g., instagram, reels, shopping',
                         hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.5)),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

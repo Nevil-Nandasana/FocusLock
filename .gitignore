@@ -1,39 +1,58 @@
-venv
-__pycache__
-# add all the elements which are not suppose to be there on the github.
-```ignore
+# Environments
 .env
-.vscode/
-.idea/
-*.log
-dist/
-build/
-*.egg-info/
-.DS_Store
-```
-node_modules 
-.env
-.vscode/
-.idea/
-*.log
-dist/
-build/
-*.egg-info/
-.DS_Store
-node_modules/
-ROADMAP.md
-*.pyc
-*.pyo
-*.pyd
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
 .Python
 pip-log.txt
 pip-delete-this-directory.txt
-.tox/
-.coverage
 .pytest_cache/
 .mypy_cache/
+.tox/
+.coverage
+
+# IDEs and Editors
+.vscode/
+.idea/
 *.swp
 *.swo
 *~
+
+# OS Files
 .DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
 run.spec
+
+# Data, Logs, and ML Models
+data/db/*.db
+data/db/*.json
+data/logs/*.log
+data/logs/*.jsonl
+data/ml/*.pkl
+data/ml/*.csv
+data/ml/*.json
+
+# Exclude legacy data files (if they reappear)
+focuslock.db
+focuslock_data.json
+*.log
+backend/focus_model.pkl
+backend/training_data.csv
+backend/data/
+
+# Roadmap
+ROADMAP.md

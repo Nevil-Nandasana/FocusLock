@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'providers.dart';
 import 'ui_components.dart';
 import 'setup_session.dart';
-import 'active_session.dart';
+import 'insights_screen.dart';
+import 'dashboard_screen.dart';
 
 void main() {
   runApp(
@@ -20,10 +20,6 @@ class FocusLockApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final status = ref.watch(statusProvider);
-    final isActive = status['active'] == true;
-    final isCompleted = status['completed'] == true;
-
     return MaterialApp(
       title: 'FocusLock',
       debugShowCheckedModeBanner: false,
@@ -32,18 +28,8 @@ class FocusLockApp extends ConsumerWidget {
         scaffoldBackgroundColor: const Color(0xFF11111A),
         textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
       ),
-      home: _buildHome(isActive, isCompleted),
+      home: const DashboardScreen(),
     );
-  }
-
-  Widget _buildHome(bool isActive, bool isCompleted) {
-    if (isCompleted) {
-      return const ActiveSessionScreen(isCompleted: true);
-    } else if (isActive) {
-      return const ActiveSessionScreen(isCompleted: false);
-    } else {
-      return const LandingPage();
-    }
   }
 }
 
@@ -123,7 +109,10 @@ class LandingPage extends StatelessWidget {
                     label: 'View Insights',
                     isSecondary: true,
                     onPressed: () {
-                      // Show Insights
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const InsightsScreen()),
+                      );
                     },
                   ),
                   const SizedBox(height: 48),

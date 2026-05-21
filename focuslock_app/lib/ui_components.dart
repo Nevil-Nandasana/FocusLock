@@ -1,5 +1,6 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
-import 'package:glassmorphism/glassmorphism.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class GlassCard extends StatelessWidget {
@@ -18,37 +19,38 @@ class GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassmorphicContainer(
+    final card = ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: const Color(0xFFFFFFFF).withValues(alpha: 0.30),
+              width: 1.5,
+            ),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                const Color(0xFFFFFFFF).withValues(alpha: 0.10),
+                const Color(0xFFFFFFFF).withValues(alpha: 0.05),
+              ],
+            ),
+          ),
+          child: Padding(
+            padding: padding,
+            child: child,
+          ),
+        ),
+      ),
+    );
+
+    return SizedBox(
       width: width,
-      height: height ?? double.infinity,
-      borderRadius: 24,
-      blur: 20,
-      alignment: Alignment.center,
-      border: 1.5,
-      linearGradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          const Color(0xFFffffff).withValues(alpha: 0.1),
-          const Color(0xFFFFFFFF).withValues(alpha: 0.05),
-        ],
-        stops: const [
-          0.1,
-          1,
-        ],
-      ),
-      borderGradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          const Color(0xFFffffff).withValues(alpha: 0.5),
-          const Color((0xFFFFFFFF)).withValues(alpha: 0.1),
-        ],
-      ),
-      child: Padding(
-        padding: padding,
-        child: child,
-      ),
+      height: height,
+      child: card,
     );
   }
 }

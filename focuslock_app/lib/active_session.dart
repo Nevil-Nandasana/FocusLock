@@ -14,11 +14,73 @@ class ActiveSessionScreen extends ConsumerStatefulWidget {
   const ActiveSessionScreen({super.key, required this.isCompleted});
 
   @override
-  _ActiveSessionScreenState createState() => _ActiveSessionScreenState();
+  ConsumerState<ActiveSessionScreen> createState() => _ActiveSessionScreenState();
 }
 
 class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
+
+  Future<void> _togglePause(bool currentlyPaused) async {
+    final success = await ApiService.setAfk(!currentlyPaused);
+    if (!mounted) {
+      return;
+    }
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not update pause state')),
+      );
+      return;
+    }
+    await ref.read(statusProvider.notifier).refreshNow();
+  }
+
+  Future<void> _breakSession() async {
+    final excuseController = TextEditingController();
+    final excuse = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1B2B),
+          title: const Text('Break Session', style: TextStyle(color: Colors.white)),
+          content: TextField(
+            controller: excuseController,
+            autofocus: true,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: 'Enter your reason',
+              hintStyle: TextStyle(color: Colors.white54),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, excuseController.text.trim()),
+              child: const Text('Confirm'),
+            ),
+          ],
+        );
+      },
+    );
+    excuseController.dispose();
+
+    if (!mounted || excuse == null || excuse.isEmpty) {
+      return;
+    }
+    final success = await ApiService.breakSession(excuse);
+    if (!mounted) {
+      return;
+    }
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not break session')),
+      );
+      return;
+    }
+    await ref.read(statusProvider.notifier).refreshNow();
+  }
   
   @override
   void initState() {
@@ -45,7 +107,10 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> with 
   Widget build(BuildContext context) {
     final status = ref.watch(statusProvider);
     final remaining = status['remaining'] ?? 0;
-    final isDistracted = status['is_distracted'] == true && !widget.isCompleted;
+    final isPaused = status['paused'] == true;
+    final currentState = '${status['current_state'] ?? ''}';
+    final isDistracted = (status['recovery_active'] == true || currentState == 'DISTRACTION') && !widget.isCompleted;
+    final recoverySnapshot = status['recovery_snapshot'];
 
     return Scaffold(
       body: Stack(
@@ -117,13 +182,36 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> with 
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                  const SizedBox(height: 24),
+                  if (!widget.isCompleted)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: PrimaryButton(
+                              label: isPaused ? 'Resume' : 'Pause',
+                              isSecondary: true,
+                              onPressed: () => _togglePause(isPaused),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: PrimaryButton(
+                              label: 'Break Session',
+                              onPressed: _breakSession,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
           ),
           
           if (isDistracted)
-            _buildDistractionLightbox(),
+            _buildDistractionLightbox(recoverySnapshot),
             
           if (widget.isCompleted)
             _buildCompletionLightbox(status),
@@ -132,7 +220,11 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> with 
     );
   }
 
-  Widget _buildDistractionLightbox() {
+  Widget _buildDistractionLightbox(dynamic recoverySnapshot) {
+    final app = recoverySnapshot is Map<String, dynamic> ? recoverySnapshot['app'] : '';
+    final title = recoverySnapshot is Map<String, dynamic> ? recoverySnapshot['title'] : '';
+    final reason = recoverySnapshot is Map<String, dynamic> ? recoverySnapshot['reason'] : '';
+
     return BackdropFilter(
       filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
       child: Container(
@@ -168,8 +260,49 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> with 
                     height: 1.5,
                   ),
                 ),
+                if ('$app$title$reason'.trim().isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'App: $app\nTitle: $title\nReason: $reason',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: Colors.white60,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
-                // Soft vibration can be handled on mobile via HapticFeedback but we're cross-platform
+                Row(
+                  children: [
+                    Expanded(
+                      child: PrimaryButton(
+                        label: 'I Corrected It',
+                        onPressed: () async {
+                          await ApiService.markRecoveryCorrect();
+                          if (!mounted) {
+                            return;
+                          }
+                          await ref.read(statusProvider.notifier).refreshNow();
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: PrimaryButton(
+                        label: 'Ignore',
+                        isSecondary: true,
+                        onPressed: () async {
+                          await ApiService.markRecoveryIgnore();
+                          if (!mounted) {
+                            return;
+                          }
+                          await ref.read(statusProvider.notifier).refreshNow();
+                        },
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
