@@ -145,28 +145,48 @@ Feedback & Logging
 ## 📂 Project Structure
 
 ```
-focuslock/
+FocusLock/
 │
 ├── backend/
-│   ├── engine.py        # Decision State Machine, Drift, Cooldowns
-│   ├── classifier.py    # Hybrid Feature Generator (Heuristics + NLP)
-│   ├── monitor.py       # Data extraction (Window Title + Process Name)
-│   ├── logger.py        # Structured Log initialization
-│   ├── store.py         # Event-sourced SQLite store + Crypto Hashing
-│   ├── train_model.py   # AI Pipeline Training Script
-│   ├── dataset_generator.py
-│   └── data/            # Local logging and ML staging data
+│   ├── core/            # Core Engine components
+│   │   ├── engine.py          # Decision State Machine, Drift, Cooldowns
+│   │   ├── store.py           # Event-sourced SQLite store + Crypto Hashing
+│   │   ├── monitor.py         # Data extraction (Window Title + Process Name)
+│   │   ├── context_builder.py # Context extraction logic
+│   │   └── window_utils.py    # Window manipulation helpers
+│   │
+│   ├── ml/              # Machine Learning pipeline
+│   │   ├── classifier.py      # Hybrid Feature Generator (Heuristics + NLP)
+│   │   ├── intent_engine.py   # Intent parser and analysis engine
+│   │   ├── learning_manager.py# Background model retrainer orchestrator
+│   │   └── train_model.py     # AI Pipeline Training Script
+│   │
+│   └── utils/           # Helper utilities
+│       ├── logger.py          # Structured Log initialization
+│       └── user_profile.py    # Pre-seeded/dynamic user alignment profiles
 │
-├── focuslock_app/       # Legacy / Optional Flutter Desktop Frontend
+├── data/                # Local runtime data (ignored by Git)
+│   ├── db/              # focuslock.db database
+│   ├── logs/            # App activity and error logs
+│   └── ml/              # focus_model.pkl, training datasets, feedback JSONs
+│
+├── scripts/             # Standalone development/testing tools
+│   ├── verify.py              # Classifier budget and drift validator
+│   ├── LogToDataSetconv.py    # Log-to-dataset CSV parsing tool
+│   ├── dataset_generator.py   # Mock training data generator
+│   └── run.spec               # PyInstaller packaging configuration
+│
+├── focuslock_app/       # Flutter Desktop/Mobile Client Frontend
 │   └── lib/ ...
 │
 ├── templates/           # Flask HTML Web Client
-│   └── index.html       # Main UI Layout
+│   ├── index.html       # Main UI Layout
+│   └── analytics.html   # System Analytics View
+│
 ├── static/              # Web Client Assets
 │   ├── css/main.css     # Glassmorphism Design System
 │   └── js/client.js     # Dom manipulation and Polling logic
 │
-├── focuslock.db         # SQLite event log (auto-created)
 ├── run.py               # Application Entry (Flask API)
 └── README.md
 ```
