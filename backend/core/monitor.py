@@ -55,11 +55,11 @@ class WindowMonitor:
 
     # ── Window Info ───────────────────────────────────────────────────────────
 
-    def _get_active_window_info(self) -> tuple[str, str]:
+    def _get_active_window_info(self) -> tuple[int, str, str]:
         try:
             hwnd = self.user32.GetForegroundWindow()
             if not hwnd:
-                return "", "Unknown"
+                return 0, "", "Unknown"
 
             # Title
             length = self.user32.GetWindowTextLengthW(hwnd)
@@ -75,11 +75,11 @@ class WindowMonitor:
             except Exception:
                 app_name = "Unknown"
 
-            return title, app_name
+            return hwnd, title, app_name
 
         except Exception as e:
             log.debug("[WindowMonitor] _get_active_window_info error: %s", e)
-            return "", "Unknown"
+            return 0, "", "Unknown"
 
     # ── Monitor Loop with Auto-Restart Watchdog ────────────────────────────────
 
@@ -88,7 +88,7 @@ class WindowMonitor:
 
         while self.running:
             try:
-                title, app_name = self._get_active_window_info()
+                hwnd, title, app_name = self._get_active_window_info()
 
                 # Skip OS-level overlays
                 if title in ("Task Switching", "Task View", "Program Manager"):
@@ -96,8 +96,11 @@ class WindowMonitor:
                     consecutive_errors = 0
                     continue
 
-                state      = {"title": title, "app": app_name, "url": ""}
-                state_hash = f"{title}_{app_name}"
+                from backend.core.tab_url_scraper import scrape_browser_tab_url_safe
+                url = scrape_browser_tab_url_safe(hwnd, app_name)
+
+                state      = {"title": title, "app": app_name, "url": url}
+                state_hash = f"{title}_{app_name}_{url}"
 
                 if state_hash != self.last_state_hash:
                     self.last_state_hash = state_hash

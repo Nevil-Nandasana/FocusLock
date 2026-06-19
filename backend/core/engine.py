@@ -213,8 +213,21 @@ class FocusEngine:
 
         confidence = features.get("confidence", 0)
         h_score    = features.get("heuristic_score", 0)
+        ml_prob    = features.get("ml_prob", 0.0)
+        ml_ready   = clf.ml_ready
 
-        # 3. Decision Logic (Classification)
+        # 3. Decision Logic — 4-tier deterministic fusion
+        #
+        # Tier 0 (absolute): whitelist / blacklist / negative_override
+        #   → Label set directly. ML and heuristics are not consulted.
+        # Tier 1 (heuristic strong): |h_score| > 15
+        #   → Heuristic determines label. ML may adjust confidence only.
+        # Tier 2 (heuristic ambiguous): -15 ≤ h_score ≤ 15, ML ready
+        #   → ML is the primary decision maker when ml_prob > 0.65.
+        # Tier 2 fallback: ML not ready or prob ≤ 0.65 → NEUTRAL.
+        # Tier 3 (confidence adjustment): applied after label is set.
+        #   ML agreement boosts confidence; disagreement reduces it.
+
         classification = "NEUTRAL"
         reason         = "Ambiguous"
 
@@ -228,12 +241,30 @@ class FocusEngine:
             classification = "DISTRACTION"
             reason         = "Anti-intent app"
         else:
+            # Tier 1 — heuristic is decisive
             if h_score < -15:
                 classification = "DISTRACTION"
                 reason         = "Distraction detected"
             elif h_score > 15:
                 classification = "PRODUCTIVE"
                 reason         = "Aligned"
+            # Tier 2 — heuristic ambiguous; let ML decide if available
+            elif ml_ready and ml_prob > 0.65:
+                ml_label       = clf.prob_to_label(ml_prob, features)
+                classification = ml_label
+                reason         = f"ML decision (prob={ml_prob:.2f})"
+            # else: remains NEUTRAL
+
+        # Tier 3 — ML confidence adjustment (does NOT flip the label)
+        # Only apply when label came from heuristics or ML (not from overrides).
+        if (ml_ready and ml_prob > 0.65
+                and not features.get("whitelist_match")
+                and not features.get("blacklist_match")):
+            ml_label = clf.prob_to_label(ml_prob, features)
+            if ml_label == classification:
+                confidence = min(98.0, confidence + 15)   # ML agrees: boost
+            else:
+                confidence = max(40.0, confidence - 10)   # ML disagrees: reduce
 
         # 4. Confidence Handling & Escalation
         final_state = classification
@@ -318,6 +349,26 @@ class FocusEngine:
             classification = classification,
             behavior       = behavior_state
         )
+
+        # 8. Live training data collection
+        # Write a row for every confident PRODUCTIVE / DISTRACTION classification
+        # so the retrain loop learns from real session data, not just the static
+        # seed CSV.  NEUTRAL is omitted — it adds noise without signal.
+        if classification in ("PRODUCTIVE", "DISTRACTION"):
+            try:
+                logger.log_training_row(
+                    title      = raw_state.get("title", ""),
+                    app        = raw_state.get("app", ""),
+                    url        = "",
+                    goal       = session.get("intent", ""),
+                    mode       = session.get("mode", "normal"),
+                    similarity = features.get("semantic_similarity", 0),
+                    heuristic  = features.get("heuristic_score", 0),
+                    confidence = features.get("confidence", 0),
+                    label      = classification,
+                )
+            except Exception as exc:
+                log.debug("[Engine] log_training_row failed: %s", exc)
 
     # ── Status ────────────────────────────────────────────────────────────────
 

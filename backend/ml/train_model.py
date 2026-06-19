@@ -66,7 +66,18 @@ def _normalize_training_frame(df, source_name: str):
 # ─────────────────────────────────────────────────────────────
 # Training
 # ─────────────────────────────────────────────────────────────
-def train_model() -> dict:
+def train_model(data: list | None = None) -> dict:
+    """
+    Train the focus classifier.
+
+    Args:
+        data: Optional list of dicts collected from live classification
+              sessions.  Each dict must contain keys matching the CSV schema:
+              window_title (or title), goal, mode, label, similarity.
+              When provided these rows are merged with the on-disk CSV before
+              training, so the model continuously improves from real usage.
+              Pass None (or omit) to train on static CSV data only.
+    """
     log.info("[TrainModel] Starting training")
 
     try:
@@ -102,6 +113,20 @@ def train_model() -> dict:
                 frames.append(norm)
         except Exception as e:
             log.error("[TrainModel] Failed loading %s: %s", name, e)
+
+    # ── Merge live session data ────────────────────────────────
+    if data:
+        try:
+            supplementary = pd.DataFrame(data)
+            supplementary = _normalize_training_frame(supplementary, "live_session_data")
+            if not supplementary.empty:
+                frames.append(supplementary)
+                log.info(
+                    "[TrainModel] Merged %d live rows from session data.",
+                    len(supplementary),
+                )
+        except Exception as exc:
+            log.warning("[TrainModel] Failed to merge live data: %s", exc)
 
     if not frames:
         log.warning("[TrainModel] No usable data")

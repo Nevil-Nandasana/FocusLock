@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'api_service.dart';
+import 'connection_config_screen.dart';
 import 'providers.dart';
 import 'ui_components.dart';
 
@@ -163,6 +164,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final status = ref.watch(statusProvider);
+    final connectionAsync = ref.watch(connectionProvider);
+    final connection = connectionAsync.valueOrNull;
+    final isConnected = connection?.isConnected ?? false;
     final isActive = status['active'] == true;
     final isCompleted = status['completed'] == true;
     final userStats = (status['user_stats'] is Map<String, dynamic>)
@@ -192,32 +196,41 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 520),
-                  child: GlassCard(
-                    padding: const EdgeInsets.all(28),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _buildHeader(userStats),
-                        const SizedBox(height: 28),
-                        if (!isActive && !isCompleted) ...[
-                          _buildSetupForm(),
-                        ] else if (isActive) ...[
-                          _buildActiveView(status, activity, currentState, prediction),
-                        ] else ...[
-                          _buildCompletionView(summary, userStats),
-                        ],
-                        const SizedBox(height: 20),
-                        if (_loadingMeta)
-                          const Center(child: Padding(
-                            padding: EdgeInsets.only(top: 8),
-                            child: CircularProgressIndicator(),
-                          )),
-                        if (!_loadingMeta) ...[
-                          const SizedBox(height: 8),
-                          _buildMetaRow(),
-                        ],
-                      ],
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // ── Connection banner ──────────────────────────────────
+                      _buildConnectionBanner(connection, connectionAsync.isLoading),
+                      const SizedBox(height: 12),
+                      // ── Main card ──────────────────────────────────────────
+                      GlassCard(
+                        padding: const EdgeInsets.all(28),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildHeader(userStats),
+                            const SizedBox(height: 28),
+                            if (!isActive && !isCompleted) ...[
+                              _buildSetupForm(),
+                            ] else if (isActive) ...[
+                              _buildActiveView(status, activity, currentState, prediction, isConnected: isConnected),
+                            ] else ...[
+                              _buildCompletionView(summary, userStats),
+                            ],
+                            const SizedBox(height: 20),
+                            if (_loadingMeta)
+                              const Center(child: Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: CircularProgressIndicator(),
+                              )),
+                            if (!_loadingMeta) ...[
+                              const SizedBox(height: 8),
+                              _buildMetaRow(),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -371,8 +384,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     Map<String, dynamic> status,
     Map<String, dynamic> activity,
     String currentState,
-    dynamic prediction,
-  ) {
+    dynamic prediction, {
+    bool isConnected = false,
+  }) {
     final features = (activity['features'] is Map<String, dynamic>)
         ? activity['features'] as Map<String, dynamic>
         : <String, dynamic>{};
@@ -428,50 +442,73 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         if (intentProfile.isNotEmpty) const SizedBox(height: 16),
         _sectionTitle('Live Telemetry'),
         const SizedBox(height: 10),
-        _innerPanel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${activity['app'] ?? '—'}',
-                      style: GoogleFonts.inter(
-                        color: const Color(0xFF8E8CFF),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                      overflow: TextOverflow.ellipsis,
+        // Telemetry is only meaningful when the Windows engine is connected.
+        if (!isConnected)
+          _innerPanel(
+            borderColor: const Color(0xFFF59E0B).withValues(alpha: 0.3),
+            child: Row(
+              children: [
+                const Icon(Icons.computer_outlined, color: Color(0xFFF59E0B), size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Window monitoring runs on the connected Windows host only. '  
+                    'Connect to see live telemetry.',
+                    style: GoogleFonts.inter(
+                      color: Colors.white60,
+                      fontSize: 12,
+                      height: 1.4,
                     ),
                   ),
-                  Text(
-                    '${_toInt(features['latency_ms'])}ms',
-                    style: GoogleFonts.jetBrainsMono(
-                      color: Colors.white54,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                '${activity['title'] ?? 'Waiting for telemetry...'}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.jetBrainsMono(
-                  color: Colors.white54,
-                  fontSize: 11,
                 ),
-              ),
-              const SizedBox(height: 18),
-              _metricBar('CONFIDENCE', _toDouble(features['confidence']) / 100, '${_toDouble(features['confidence']).round()}%'),
-              const SizedBox(height: 14),
-              _metricBar('SEMANTIC MATCH', _toDouble(features['semantic_similarity']), _toDouble(features['semantic_similarity']).toStringAsFixed(2), accent: const Color(0xFFF59E0B)),
-            ],
+              ],
+            ),
+          )
+        else
+          _innerPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${activity['app'] ?? '—'}',
+                        style: GoogleFonts.inter(
+                          color: const Color(0xFF8E8CFF),
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Text(
+                      '${_toInt(features['latency_ms'])}ms',
+                      style: GoogleFonts.jetBrainsMono(
+                        color: Colors.white54,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '${activity['title'] ?? 'Waiting for telemetry...'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.jetBrainsMono(
+                    color: Colors.white54,
+                    fontSize: 11,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                _metricBar('CONFIDENCE', _toDouble(features['confidence']) / 100, '${_toDouble(features['confidence']).round()}%'),
+                const SizedBox(height: 14),
+                _metricBar('SEMANTIC MATCH', _toDouble(features['semantic_similarity']), _toDouble(features['semantic_similarity']).toStringAsFixed(2), accent: const Color(0xFFF59E0B)),
+              ],
+            ),
           ),
-        ),
         if (prediction is Map<String, dynamic> && prediction['warning'] == true) ...[
           const SizedBox(height: 16),
           _innerPanel(
@@ -719,6 +756,89 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  // ── Connection Banner ──────────────────────────────────────────────────────
+
+  Widget _buildConnectionBanner(HostConnectionState? conn, bool isLoading) {
+    final Color bgColor;
+    final Color borderColor;
+    final IconData icon;
+    final String label;
+    final String sublabel;
+
+    if (isLoading || conn == null) {
+      bgColor = Colors.white.withValues(alpha: 0.05);
+      borderColor = Colors.white.withValues(alpha: 0.12);
+      icon = Icons.hourglass_top_outlined;
+      label = 'Connecting…';
+      sublabel = 'Probing Windows host';
+    } else if (conn.isConnected) {
+      bgColor = const Color(0xFF16A34A).withValues(alpha: 0.12);
+      borderColor = const Color(0xFF16A34A).withValues(alpha: 0.35);
+      icon = Icons.check_circle_outline;
+      label = 'Connected';
+      sublabel = conn.hostUrl;
+    } else {
+      bgColor = const Color(0xFFEF4444).withValues(alpha: 0.10);
+      borderColor = const Color(0xFFEF4444).withValues(alpha: 0.30);
+      icon = Icons.warning_amber_outlined;
+      label = 'Not connected — Windows backend required';
+      sublabel = conn.lastError ?? conn.hostUrl;
+    }
+
+    final iconColor = isLoading || conn == null
+        ? Colors.white54
+        : conn.isConnected
+            ? const Color(0xFF4ADE80)
+            : const Color(0xFFFCA5A5);
+
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const ConnectionConfigScreen(),
+        ),
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: iconColor, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: GoogleFonts.inter(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    sublabel,
+                    style: GoogleFonts.jetBrainsMono(
+                      color: Colors.white54,
+                      fontSize: 10,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.settings_outlined, color: Colors.white38, size: 16),
+          ],
         ),
       ),
     );

@@ -1,0 +1,14 @@
+# FocusLock — Python runtime dependencies
+# Install: pip install -r requirements.txt
+# For ML features: pip install -r requirements.txt -r requirements-ml.txt
+
+# ── Core (always required) ────────────────────────────────────────────────────
+flask>=3.0.0,<4.0
+psutil>=6.0.0
+comtypes>=1.4.0          # Windows UIAutomation COM (tab_url_scraper)
+
+# ── Optional ML (required for real classification; heuristics work without) ──
+# sentence-transformers>=3.0.0
+# scikit-learn>=1.5.0
+# joblib>=1.4.0
+# numpy>=1.26.0

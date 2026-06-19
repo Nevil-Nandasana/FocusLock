@@ -20,6 +20,7 @@ import json
 import hashlib
 import logging
 import os
+import threading
 from datetime import datetime, timedelta
 
 log = logging.getLogger(__name__)
@@ -31,6 +32,12 @@ DB_FILE  = os.path.join(BASE_DIR, "data", "db", "focuslock.db")
 class EventStore:
 
     def __init__(self):
+        # Stats cache — invalidated on any session-affecting write so every
+        # quiet poll is O(1) instead of O(n full table scan).
+        self._stats_cache: dict | None = None
+        self._stats_dirty              = True   # True → recompute on next read
+        self._stats_lock               = threading.Lock()
+
         self._init_db()
 
     # ── Schema ────────────────────────────────────────────────────────────────
@@ -116,6 +123,15 @@ class EventStore:
                 (event_type, timestamp, payload_json,
                  session_id, prev_hash, current_hash),
             )
+
+        # Invalidate stats cache for any event that changes XP.
+        _XP_EVENTS = {
+            "SESSION_START", "SESSION_COMPLETE", "SESSION_BROKEN",
+            "SESSION_STOP",  "FOCUS_VIOLATION",  "SESSION_EXTEND",
+        }
+        if event_type in _XP_EVENTS:
+            with self._stats_lock:
+                self._stats_dirty = True
 
     # ── Full Event Read (analytics page only) ─────────────────────────────────
 
@@ -341,64 +357,109 @@ class EventStore:
     # ── Gamification ─────────────────────────────────────────────────────────
 
     def get_user_stats(self) -> dict:
-        """Calculate XP and Level from the event history."""
-        events = self.get_events()
+        """
+        Return XP / level / session counts.
 
-        xp = 0
-        total_sessions     = 0
-        completed_sessions = 0
-        sessions: dict     = {}
+        Results are cached and invalidated only when an XP-affecting event is
+        written (SESSION_START, SESSION_COMPLETE, SESSION_BROKEN, SESSION_STOP,
+        FOCUS_VIOLATION, SESSION_EXTEND).  Between those events every call is
+        O(1) — a dict copy of the cached value.
+        """
+        with self._stats_lock:
+            if not self._stats_dirty and self._stats_cache is not None:
+                return dict(self._stats_cache)          # O(1) cache hit
 
-        for e in events:
-            payload = e.get("payload", {})
-            if not isinstance(payload, dict):
-                continue
+        stats = self._compute_user_stats_sql()          # recompute via SQL
 
-            sid = payload.get("session_id")
+        with self._stats_lock:
+            self._stats_cache = stats
+            self._stats_dirty = False
+        return dict(stats)
 
-            if e["type"] == "SESSION_START":
-                if not sid:
-                    continue
-                sessions[sid] = {
-                    "duration":   payload.get("expected_duration", 25),
-                    "violations": 0,
-                    "completed":  False,
-                    "broken":     False,
-                }
-                total_sessions += 1
+    def _compute_user_stats_sql(self) -> dict:
+        """
+        Compute XP aggregates entirely in SQL using indexed session_id columns.
 
-            elif e["type"] == "FOCUS_VIOLATION":
-                if sid and sid in sessions:
-                    sessions[sid]["violations"] += 1
+        XP formula (per session, matches original Python logic exactly):
+          completed:  +duration*10, +100 bonus if zero violations
+          always:     -violations*50
+          broken:     -100
+        """
+        sql = """
+        WITH sessions AS (
+            SELECT
+                session_id,
+                CAST(json_extract(payload, '$.expected_duration') AS INTEGER)
+                    AS base_duration
+            FROM events
+            WHERE event_type = 'SESSION_START'
+              AND session_id IS NOT NULL
+        ),
+        extensions AS (
+            SELECT session_id,
+                   SUM(CAST(json_extract(payload, '$.extension_minutes')
+                            AS INTEGER)) AS extra_minutes
+            FROM events
+            WHERE event_type = 'SESSION_EXTEND'
+            GROUP BY session_id
+        ),
+        violations AS (
+            SELECT session_id, COUNT(*) AS vcount
+            FROM events
+            WHERE event_type = 'FOCUS_VIOLATION'
+            GROUP BY session_id
+        ),
+        completions AS (
+            SELECT DISTINCT session_id, 1 AS completed
+            FROM events
+            WHERE event_type = 'SESSION_COMPLETE'
+        ),
+        breaks AS (
+            SELECT DISTINCT session_id, 1 AS broken
+            FROM events
+            WHERE event_type = 'SESSION_BROKEN'
+        ),
+        per_session AS (
+            SELECT
+                s.session_id,
+                COALESCE(s.base_duration, 25) + COALESCE(e.extra_minutes, 0)
+                    AS duration,
+                COALESCE(v.vcount, 0)       AS violations,
+                COALESCE(c.completed, 0)    AS completed,
+                COALESCE(b.broken, 0)       AS broken
+            FROM sessions s
+            LEFT JOIN extensions  e ON e.session_id = s.session_id
+            LEFT JOIN violations  v ON v.session_id = s.session_id
+            LEFT JOIN completions c ON c.session_id = s.session_id
+            LEFT JOIN breaks      b ON b.session_id = s.session_id
+        )
+        SELECT
+            COUNT(*)          AS total_sessions,
+            SUM(completed)    AS completed_sessions,
+            SUM(
+                CASE WHEN completed THEN duration * 10 ELSE 0 END
+                + CASE WHEN completed AND violations = 0 THEN 100 ELSE 0 END
+                - violations * 50
+                - CASE WHEN broken THEN 100 ELSE 0 END
+            )                 AS raw_xp
+        FROM per_session
+        """
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                row = conn.execute(sql).fetchone()
+        except Exception as exc:
+            log.error("[EventStore] _compute_user_stats_sql failed: %s", exc)
+            row = None
 
-            elif e["type"] == "SESSION_COMPLETE":
-                if sid and sid in sessions:
-                    sessions[sid]["completed"] = True
-                    completed_sessions += 1
-
-            elif e["type"] == "SESSION_EXTEND":
-                if sid and sid in sessions:
-                    sessions[sid]["duration"] += payload.get("extension_minutes", 0)
-
-            elif e["type"] == "SESSION_BROKEN":
-                if sid and sid in sessions:
-                    sessions[sid]["broken"] = True
-
-        for data in sessions.values():
-            if data["completed"]:
-                xp += data["duration"] * 10
-                if data["violations"] == 0:
-                    xp += 100
-            xp -= data["violations"] * 50
-            if data["broken"]:
-                xp -= 100
-
-        xp    = max(0, xp)
-        level = 1 + int(xp / 1000)
+        total_sessions     = int(row[0] or 0) if row else 0
+        completed_sessions = int(row[1] or 0) if row else 0
+        raw_xp             = int(row[2] or 0) if row else 0
+        xp                 = max(0, raw_xp)
+        level              = 1 + int(xp / 1000)
 
         return {
-            "xp":                xp,
-            "level":             level,
-            "total_sessions":    total_sessions,
+            "xp":                 xp,
+            "level":              level,
+            "total_sessions":     total_sessions,
             "completed_sessions": completed_sessions,
         }

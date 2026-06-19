@@ -1,10 +1,8 @@
-# Environments
+# ── Python ────────────────────────────────────────────────────────────────────
 .env
 .venv/
 venv/
 env/
-
-# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -16,28 +14,32 @@ pip-delete-this-directory.txt
 .mypy_cache/
 .tox/
 .coverage
+coverage.xml
+*.egg-info/
+dist/
+build/
 
-# IDEs and Editors
+# ── IDEs and Editors ──────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS Files
+# ── OS Files ──────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Node
+# ── Node / Tailwind toolchain (not used — removed) ───────────────────────────
 node_modules/
+package-lock.json
+package.json
 
-# Build artifacts
-dist/
-build/
-*.egg-info/
+# ── PyInstaller ───────────────────────────────────────────────────────────────
 run.spec
+*.spec
 
-# Data, Logs, and ML Models
+# ── Data, Logs, and ML Models ─────────────────────────────────────────────────
 data/db/*.db
 data/db/*.json
 data/logs/*.log
@@ -46,7 +48,7 @@ data/ml/*.pkl
 data/ml/*.csv
 data/ml/*.json
 
-# Exclude legacy data files (if they reappear)
+# Legacy data paths (belt-and-suspenders)
 focuslock.db
 focuslock_data.json
 *.log
@@ -54,5 +56,17 @@ backend/focus_model.pkl
 backend/training_data.csv
 backend/data/
 
-# Roadmap
-ROADMAP.md
+# ── Flutter app ───────────────────────────────────────────────────────────────
+focuslock_app/build/
+focuslock_app/.dart_tool/
+focuslock_app/.flutter-plugins
+focuslock_app/.flutter-plugins-dependencies
+focuslock_app/pubspec.lock
+
+# Debug/scratch text dumps (never commit these)
+focuslock_app/*.txt
+focuslock_app/*.log
+
+# Flutter generated files
+focuslock_app/**/*.g.dart
+focuslock_app/**/*.freezed.dart

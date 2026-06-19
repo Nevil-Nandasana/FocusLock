@@ -39,6 +39,10 @@ class FeatureClassifier:
         self.util       = None
         self.ml_error   = None
 
+        # Cached label from the most recent _run_ml_pipeline() call.
+        # Initialised to NEUTRAL so prob_to_label() is always safe to call.
+        self._last_ml_label: str = "NEUTRAL"
+
         # Lazy loading state — models only load on first classify call
         self._load_started = False
         self._load_lock    = threading.Lock()
@@ -219,6 +223,7 @@ class FeatureClassifier:
             "blacklist_match":     is_blacklist,
             "matched_concepts":    matched_concepts,
             "latency_ms":          latency_ms,
+            "ml_prob":             round(float(ml_prob), 3),
         }
 
     # ── Real-time Feedback (Layer 1 + Layer 2) ────────────────────────────────
@@ -272,10 +277,23 @@ class FeatureClassifier:
                 features  = np.hstack(([[sim, 2]], tfidf_vec))
                 probs     = self.model.predict_proba(features)[0]
                 prob      = float(np.max(probs))
+                # Cache the winning label so prob_to_label() is free
+                self._last_ml_label = str(
+                    self.model.classes_[int(np.argmax(probs))]
+                )
             except Exception:
                 pass
 
         return sim, prob
+
+    def prob_to_label(self, prob: float, features: dict) -> str:
+        """
+        Return the ML-predicted label for the most recent extract_features() call.
+
+        Uses the label cached by _run_ml_pipeline() to avoid re-running the
+        model.  Returns 'NEUTRAL' if the model has not run yet or failed.
+        """
+        return self._last_ml_label
 
 
 # ── Global Singleton ──────────────────────────────────────────────────────────

@@ -1,23 +1,28 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+/// Central HTTP client for the FocusLock backend.
+///
+/// **Platform model (Path A — Windows-tethered remote control)**
+/// The monitoring engine only runs on the Windows host. This client connects
+/// to whatever URL the user configures (defaults to localhost for Windows
+/// builds; must be manually set to the host IP for Android/other platforms).
 class ApiService {
-  static const String _baseUrlFromEnv = String.fromEnvironment('API_BASE_URL', defaultValue: '');
-  static const String _apiKey = String.fromEnvironment('FOCUSLOCK_API_KEY', defaultValue: '');
+  // ── Host configuration ─────────────────────────────────────────────────────
+  // Runtime-mutable so [ConnectionNotifier.setHost] can update it without a
+  // restart. Initialised to localhost; callers on non-Windows platforms must
+  // call [setHostUrl] with the real Windows machine IP.
 
-  static String get baseUrl {
-    if (_baseUrlFromEnv.isNotEmpty) {
-      return _baseUrlFromEnv;
-    }
-    if (kIsWeb) {
-      return 'http://127.0.0.1:5000/api';
-    }
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      return 'http://10.0.2.2:5000/api';
-    }
-    return 'http://127.0.0.1:5000/api';
+  static String _baseUrl = 'http://127.0.0.1:5000/api';
+  static String get baseUrl => _baseUrl;
+
+  static void setHostUrl(String url) {
+    _baseUrl = url.endsWith('/api') ? url : '$url/api';
   }
+
+  // ── Optional API key ────────────────────────────────────────────────────────
+  static const String _apiKey =
+      String.fromEnvironment('FOCUSLOCK_API_KEY', defaultValue: '');
 
   static Map<String, String> _headers({bool includeJson = false}) {
     final headers = <String, String>{};
@@ -30,9 +35,11 @@ class ApiService {
     return headers;
   }
 
+  // ── Low-level helpers ───────────────────────────────────────────────────────
+
   static Future<Map<String, dynamic>> _get(String path) async {
     final response = await http
-        .get(Uri.parse('$baseUrl/$path'), headers: _headers())
+        .get(Uri.parse('$_baseUrl/$path'), headers: _headers())
         .timeout(const Duration(seconds: 3));
     return _decodeMap(response.body, response.statusCode);
   }
@@ -43,7 +50,7 @@ class ApiService {
   }) async {
     final response = await http
         .post(
-          Uri.parse('$baseUrl/$path'),
+          Uri.parse('$_baseUrl/$path'),
           headers: _headers(includeJson: body != null),
           body: body == null ? null : jsonEncode(body),
         )
@@ -52,13 +59,12 @@ class ApiService {
   }
 
   static Map<String, dynamic> _decodeMap(String body, int statusCode) {
-    final decoded = jsonDecode(body);
-    if (decoded is Map<String, dynamic>) {
-      return {
-        ...decoded,
-        '_statusCode': statusCode,
-      };
-    }
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        return {...decoded, '_statusCode': statusCode};
+      }
+    } catch (_) {}
     return {'error': 'Unexpected response format', '_statusCode': statusCode};
   }
 
@@ -66,6 +72,25 @@ class ApiService {
     final statusCode = response['_statusCode'];
     return statusCode is int && statusCode >= 200 && statusCode < 300;
   }
+
+  // ── Connection probe ────────────────────────────────────────────────────────
+
+  /// Returns true if [hostBaseUrl] responds to a `/health` check within 3 s.
+  /// [hostBaseUrl] should be the API base URL (with or without `/api` suffix).
+  static Future<bool> probeHost(String hostBaseUrl) async {
+    try {
+      // Derive the /health endpoint from whatever the caller provides.
+      final base = hostBaseUrl.replaceAll(RegExp(r'/api/?$'), '');
+      final response = await http
+          .get(Uri.parse('$base/health'))
+          .timeout(const Duration(seconds: 3));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ── Public API ──────────────────────────────────────────────────────────────
 
   static Future<Map<String, dynamic>> getStatus() async {
     try {
@@ -169,6 +194,36 @@ class ApiService {
       return await _get('integrity');
     } catch (e) {
       return {'error': e.toString()};
+    }
+  }
+
+  /// Fetch effective heuristic weights for [intentKey] from [/api/profile/weights].
+  /// Returns {intent, buckets, weights, user_deltas}.
+  static Future<Map<String, dynamic>> getProfileWeights(
+      String intentKey) async {
+    try {
+      return await _get(
+          'profile/weights?intent=${Uri.encodeComponent(intentKey)}');
+    } catch (e) {
+      return {'error': e.toString()};
+    }
+  }
+
+  /// Post a manual feedback signal to [/api/feedback].
+  /// [label] must be 'PRODUCTIVE' or 'DISTRACTION'.
+  /// [concept] is typically the app name or a keyword concept.
+  static Future<bool> submitFeedback({
+    required String concept,
+    required String label,
+  }) async {
+    try {
+      final response = await _post(
+        'feedback',
+        body: {'app': concept, 'title': '', 'label': label},
+      );
+      return _isSuccess(response);
+    } catch (e) {
+      return false;
     }
   }
 }

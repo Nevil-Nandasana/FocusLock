@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'api_service.dart';
+import 'profile_screen.dart';
 import 'providers.dart';
 import 'ui_components.dart';
 
@@ -160,6 +161,15 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                         'prediction': status['prediction'],
                         'paused': status['paused'],
                       }),
+                    ),
+                    const SizedBox(height: 16),
+                    PrimaryButton(
+                      label: 'AI Profile & Weights →',
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const ProfileScreen()),
+                      ),
                     ),
                   ],
                 ],

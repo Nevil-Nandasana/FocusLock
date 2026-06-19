@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "focuslock"
+version = "0.1.0"
+description = "Cognitive session guardian — Windows-native focus enforcement"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0.0,<4.0",
+    "psutil>=6.0.0",
+    "comtypes>=1.4.0",
+]
+
+[project.optional-dependencies]
+ml = [
+    "sentence-transformers>=3.0.0",
+    "scikit-learn>=1.5.0",
+    "joblib>=1.4.0",
+    "numpy>=1.26.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "flake8>=7.0.0",
+    "mypy>=1.10.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

@@ -6,6 +6,7 @@ import 'ui_components.dart';
 import 'setup_session.dart';
 import 'insights_screen.dart';
 import 'dashboard_screen.dart';
+import 'profile_screen.dart';
 
 void main() {
   runApp(
@@ -112,6 +113,17 @@ class LandingPage extends StatelessWidget {
                       Navigator.push(
                         context,
                         MaterialPageRoute(builder: (_) => const InsightsScreen()),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  PrimaryButton(
+                    label: 'AI Profile & Weights',
+                    isSecondary: true,
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ProfileScreen()),
                       );
                     },
                   ),
