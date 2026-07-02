@@ -64,7 +64,7 @@ class ConnectionNotifier extends AsyncNotifier<HostConnectionState> {
 
   /// Re-probe the current host (called by status poller on each tick).
   Future<void> recheck() async {
-    final current = state.valueOrNull;
+    final current = state.asData?.value;
     if (current == null) return;
     final result = await _probe(current.hostUrl);
     state = AsyncData(result);
@@ -110,7 +110,7 @@ class StatusNotifier extends Notifier<Map<String, dynamic>> {
       } else {
         state = status;
         // Keep connection marked healthy.
-        final conn = ref.read(connectionProvider).valueOrNull;
+        final conn = ref.read(connectionProvider).asData?.value;
         if (conn != null && !conn.isConnected) {
           await ref.read(connectionProvider.notifier).recheck();
         }

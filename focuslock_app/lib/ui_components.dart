@@ -57,7 +57,7 @@ class GlassCard extends StatelessWidget {
 
 class PrimaryButton extends StatelessWidget {
   final String label;
-  final VoidCallback onPressed;
+  final void Function()? onPressed;
   final bool isSecondary;
 
   const PrimaryButton({

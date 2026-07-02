@@ -63,6 +63,8 @@ Sessions are authoritative, immutable, and auditable.
 - **Context-aware attention enforcement**: Whitelist/Blacklist + Keyword heuristic.
 - **Progressive penalty system**: Cooldowns and focus debt.
 - **Failure pattern analytics**: Prediction of session failure based on fatigue and gaps.
+- **Active Tab URL Scraping**: Uses Windows UIAutomation COM API to read the active browser tab's URL (Chrome/Edge/Firefox) without external dependencies, significantly improving context extraction.
+- **Auto-restart Watchdog**: Monitor loop auto-recovers from consecutive errors to ensure continuous tracking.
 
 **Outcome:**  
 The system actively resists avoidance and leverages game theory for retention.

@@ -108,7 +108,7 @@ Feedback & Logging
 ## ⚙️ How It Works
 
 1. The system monitors the active window
-2. Extracts context (title, app)
+2. Extracts context (title, app, and browser tab URL via UIAutomation)
 3. Computes:
 
    * heuristic score
@@ -151,7 +151,8 @@ FocusLock/
 │   ├── core/            # Core Engine components
 │   │   ├── engine.py          # Decision State Machine, Drift, Cooldowns
 │   │   ├── store.py           # Event-sourced SQLite store + Crypto Hashing
-│   │   ├── monitor.py         # Data extraction (Window Title + Process Name)
+│   │   ├── monitor.py         # Data extraction (Window Title, Process Name, and Browser URL)
+│   │   ├── tab_url_scraper.py # Windows UIAutomation URL-Bar Reader
 │   │   ├── context_builder.py # Context extraction logic
 │   │   └── window_utils.py    # Window manipulation helpers
 │   │

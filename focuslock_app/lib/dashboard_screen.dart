@@ -165,7 +165,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final status = ref.watch(statusProvider);
     final connectionAsync = ref.watch(connectionProvider);
-    final connection = connectionAsync.valueOrNull;
+    final connection = connectionAsync.asData?.value;
     final isConnected = connection?.isConnected ?? false;
     final isActive = status['active'] == true;
     final isCompleted = status['completed'] == true;

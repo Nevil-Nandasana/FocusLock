@@ -38,6 +38,8 @@ class FeatureClassifier:
         self.embedder   = None
         self.util       = None
         self.ml_error   = None
+        self._model_mtime = 0
+        self._model_lock = threading.Lock()
 
         # Cached label from the most recent _run_ml_pipeline() call.
         # Initialised to NEUTRAL so prob_to_label() is always safe to call.
@@ -47,8 +49,43 @@ class FeatureClassifier:
         self._load_started = False
         self._load_lock    = threading.Lock()
 
-    # ── Lazy Model Loading ────────────────────────────────────────────────────
+    def _reload_model_if_updated(self):
+        if not self.ml_ready:
+            return
 
+        if not os.path.exists(self.model_path):
+            return
+
+        try:
+            current_mtime = os.path.getmtime(self.model_path)
+
+            if current_mtime <= self._model_mtime:
+                return
+
+            with self._model_lock:
+                # double-check after acquiring lock
+                current_mtime = os.path.getmtime(self.model_path)
+
+                if current_mtime <= self._model_mtime:
+                    return
+
+                import joblib
+
+                log.info("[Classifier] Reloading updated model...")
+
+                artifacts = joblib.load(self.model_path)
+
+                self.model = artifacts.get("model")
+                self.tfidf = artifacts.get("tfidf")
+                self.ml_ready = True
+                self._model_mtime = current_mtime
+
+                log.info("[Classifier] Model reloaded successfully.")
+
+        except Exception as e:
+            log.warning("[Classifier] Model reload failed: %s", e)
+
+    # ── Lazy Model Loading ───────────────────────────────────────────────────
     def _ensure_loaded(self):
         """
         Trigger model loading on the first call to extract_features().
@@ -86,6 +123,7 @@ class FeatureClassifier:
                     artifacts  = joblib.load(self.model_path)
                     self.model = artifacts.get("model")
                     self.tfidf = artifacts.get("tfidf")
+                    self._model_mtime = os.path.getmtime(self.model_path)
                     self.ml_ready = True
                     log.info("[Classifier] ML model loaded successfully.")
                 except Exception as e:
@@ -131,6 +169,7 @@ class FeatureClassifier:
         """
         # Step 1 — ensure models are loading (lazy, once)
         self._ensure_loaded()
+        self._reload_model_if_updated()
 
         start_time = time.time()
 

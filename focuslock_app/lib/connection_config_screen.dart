@@ -23,7 +23,7 @@ class _ConnectionConfigScreenState
   @override
   void initState() {
     super.initState();
-    final conn = ref.read(connectionProvider).valueOrNull;
+    final conn = ref.read(connectionProvider).asData?.value;
     _urlController = TextEditingController(
       text: conn?.hostUrl ?? 'http://127.0.0.1:5000/api',
     );
