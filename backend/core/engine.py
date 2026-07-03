@@ -285,6 +285,18 @@ class FocusEngine:
         # 5. State updates
         with self._lock:
             self.last_state = self.current_state
+
+            # Enforce the FSM: only allow transitions listed in ALLOWED_TRANSITIONS.
+            # An illegal jump (e.g. PRODUCTIVE → DISTRACTION) is clamped to the
+            # intermediate WARNING state so the FSM is never bypassed silently.
+            allowed = ALLOWED_TRANSITIONS.get(self.current_state, [final_state])
+            if final_state not in allowed:
+                log.warning(
+                    "[Engine] Illegal FSM transition %s → %s; clamping to WARNING",
+                    self.current_state, final_state,
+                )
+                final_state = "WARNING"
+
             self.current_state = final_state
             self.last_classified_state = {
                 "app":      raw_state.get("app", ""),

@@ -23,11 +23,21 @@ now delegates to the tab-aware implementation.
 import ctypes
 import logging
 import platform
-from ctypes import wintypes
 
 log = logging.getLogger(__name__)
 
-user32 = ctypes.windll.user32
+
+def _user32():
+    """Lazy accessor for the Windows user32 DLL handle.
+
+    Returns the handle on Windows; returns None on every other platform.
+    Deferred so that importing this module on Linux / macOS does not raise
+    ``AttributeError: module 'ctypes' has no attribute 'windll'``.
+    """
+    if platform.system() != "Windows":
+        return None
+    from ctypes import wintypes  # noqa: F401 — imported for side-effects / callers
+    return ctypes.windll.user32
 
 # Virtual-key codes used for Ctrl+W injection
 _VK_CONTROL = 0x11
@@ -88,21 +98,26 @@ def _get_foreground_window_info() -> tuple[int, str, str]:
     Returns (0, '', '') on any failure.
     """
     import psutil
+    from ctypes import wintypes
+
+    u32 = _user32()
+    if u32 is None:
+        return 0, "", ""
 
     try:
-        hwnd = user32.GetForegroundWindow()
+        hwnd = u32.GetForegroundWindow()
         if not hwnd:
             return 0, "", ""
 
         # Title
-        length = user32.GetWindowTextLengthW(hwnd)
+        length = u32.GetWindowTextLengthW(hwnd)
         buff   = ctypes.create_unicode_buffer(length + 1)
-        user32.GetWindowTextW(hwnd, buff, length + 1)
+        u32.GetWindowTextW(hwnd, buff, length + 1)
         title = buff.value.lower()
 
         # Process name
         pid = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         try:
             proc_name = psutil.Process(pid.value).name().lower()
         except Exception:
@@ -117,9 +132,12 @@ def _get_foreground_window_info() -> tuple[int, str, str]:
 
 def get_window_title(hwnd: int) -> str:
     """Return the lower-cased title of *hwnd*."""
-    length = user32.GetWindowTextLengthW(hwnd)
+    u32 = _user32()
+    if u32 is None:
+        return ""
+    length = u32.GetWindowTextLengthW(hwnd)
     buff   = ctypes.create_unicode_buffer(length + 1)
-    user32.GetWindowTextW(hwnd, buff, length + 1)
+    u32.GetWindowTextW(hwnd, buff, length + 1)
     return buff.value.lower()
 
 
@@ -156,7 +174,10 @@ def try_close_active_tab() -> bool:
 
     # Race-condition guard: re-check that the same HWND is still foreground.
     # If the user alt-tabbed in the ~1 ms since our first check, abort.
-    current_hwnd = user32.GetForegroundWindow()
+    u32 = _user32()
+    if u32 is None:
+        return False
+    current_hwnd = u32.GetForegroundWindow()
     if current_hwnd != hwnd:
         log.info(
             "[Recovery] Skip close — foreground changed (was %s, now %s)",
@@ -166,10 +187,10 @@ def try_close_active_tab() -> bool:
 
     # Inject Ctrl+W — close current tab only.
     try:
-        user32.keybd_event(_VK_CONTROL, 0, 0,              0)  # Ctrl down
-        user32.keybd_event(_VK_W,       0, 0,              0)  # W down
-        user32.keybd_event(_VK_W,       0, _KEYEVENTF_KEYUP, 0)  # W up
-        user32.keybd_event(_VK_CONTROL, 0, _KEYEVENTF_KEYUP, 0)  # Ctrl up
+        u32.keybd_event(_VK_CONTROL, 0, 0,              0)  # Ctrl down
+        u32.keybd_event(_VK_W,       0, 0,              0)  # W down
+        u32.keybd_event(_VK_W,       0, _KEYEVENTF_KEYUP, 0)  # W up
+        u32.keybd_event(_VK_CONTROL, 0, _KEYEVENTF_KEYUP, 0)  # Ctrl up
         log.info(
             "[Recovery] Ctrl+W sent to browser tab — process=%s title=%.60s",
             proc_name, title,
@@ -201,12 +222,18 @@ def focus_focuslock() -> bool:
     if platform.system() != "Windows":
         return False
 
+    from ctypes import wintypes
+
+    u32 = _user32()
+    if u32 is None:
+        return False
+
     target_hwnd = None
 
     @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
     def enum_proc(hwnd, lParam):
         nonlocal target_hwnd
-        if user32.IsWindowVisible(hwnd):
+        if u32.IsWindowVisible(hwnd):
             title = get_window_title(hwnd)
             if "focuslock" in title:
                 target_hwnd = hwnd
@@ -214,17 +241,17 @@ def focus_focuslock() -> bool:
         return True
 
     try:
-        user32.EnumWindows(enum_proc, 0)
+        u32.EnumWindows(enum_proc, 0)
 
         if target_hwnd:
-            foreground    = user32.GetForegroundWindow()
-            current_tid   = user32.GetWindowThreadProcessId(foreground, None)
-            target_tid    = user32.GetWindowThreadProcessId(target_hwnd, None)
+            foreground    = u32.GetForegroundWindow()
+            current_tid   = u32.GetWindowThreadProcessId(foreground, None)
+            target_tid    = u32.GetWindowThreadProcessId(target_hwnd, None)
 
-            user32.AttachThreadInput(current_tid, target_tid, True)
-            user32.ShowWindow(target_hwnd, SW_RESTORE)
-            user32.SetForegroundWindow(target_hwnd)
-            user32.AttachThreadInput(current_tid, target_tid, False)
+            u32.AttachThreadInput(current_tid, target_tid, True)
+            u32.ShowWindow(target_hwnd, SW_RESTORE)
+            u32.SetForegroundWindow(target_hwnd)
+            u32.AttachThreadInput(current_tid, target_tid, False)
 
             log.info("[Recovery] FocusLock window brought to front.")
             return True

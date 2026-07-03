@@ -219,7 +219,18 @@ class FeatureClassifier:
 
         if self.embedder is not None and self.util is not None:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future      = executor.submit(self._run_ml_pipeline, intent, full_text)
+                # --- Feature alignment with train_model.py ---
+                # TF-IDF was trained on `window_title` only; pass the raw title
+                # (not the richer normalized_text) to keep vocabulary consistent.
+                title_text   = context.get("title", "")
+                # mode_encoded must use the same mapping as training:
+                #   deep=2, normal=1, drift=0 (default to 1 / normal if unknown)
+                mode_encoded = {"deep": 2, "normal": 1, "drift": 0}.get(
+                    (mode or "").lower(), 1
+                )
+                future      = executor.submit(
+                    self._run_ml_pipeline, intent, full_text, title_text, mode_encoded
+                )
                 elapsed_ms  = (time.time() - start_time) * 1000
                 budget_left = max(0.0, 100.0 - elapsed_ms) / 1000.0
                 try:
@@ -298,8 +309,23 @@ class FeatureClassifier:
 
     # ── ML Pipeline (budget-capped) ───────────────────────────────────────────
 
-    def _run_ml_pipeline(self, intent: str, text: str) -> tuple[float, float]:
-        """Runs SentenceTransformer + Scikit-Learn inside the 100 ms budget."""
+    def _run_ml_pipeline(
+        self,
+        intent:       str,
+        text:         str,
+        title:        str,
+        mode_encoded: int,
+    ) -> tuple[float, float]:
+        """Runs SentenceTransformer + Scikit-Learn inside the 100 ms budget.
+
+        Args:
+            intent:       User's session goal string (for semantic similarity).
+            text:         Full normalized context text (for semantic similarity).
+            title:        Raw window title — matches the ``window_title`` column
+                          that the TF-IDF vectorizer was fitted on at train time.
+            mode_encoded: Integer-encoded session mode (deep=2, normal=1, drift=0),
+                          matching the ``mode_encoded`` column used during training.
+        """
         sim  = 0.0
         prob = 0.0
 
@@ -312,8 +338,11 @@ class FeatureClassifier:
 
         if self.ml_ready and self.model and self.tfidf:
             try:
-                tfidf_vec = self.tfidf.transform([text]).toarray()
-                features  = np.hstack(([[sim, 2]], tfidf_vec))
+                # Use `title` (= window_title) — the same text source the
+                # TF-IDF vectorizer was fitted on during training.
+                tfidf_vec = self.tfidf.transform([title]).toarray()
+                # Use the caller-supplied mode_encoded, NOT a hardcoded literal.
+                features  = np.hstack(([[sim, mode_encoded]], tfidf_vec))
                 probs     = self.model.predict_proba(features)[0]
                 prob      = float(np.max(probs))
                 # Cache the winning label so prob_to_label() is free
@@ -333,6 +362,30 @@ class FeatureClassifier:
         model.  Returns 'NEUTRAL' if the model has not run yet or failed.
         """
         return self._last_ml_label
+
+    def reload_classifier(self) -> bool:
+        """Force reload of the ML model from disk.
+
+        Returns True on successful reload, False otherwise.
+        """
+        if not os.path.exists(self.model_path):
+            log.warning("[Classifier] Model file not found for reload.")
+            self.ml_ready = False
+            return False
+        try:
+            import joblib
+            artifacts = joblib.load(self.model_path)
+            with self._model_lock:
+                self.model = artifacts.get("model")
+                self.tfidf = artifacts.get("tfidf")
+                self.ml_ready = True
+                self._model_mtime = os.path.getmtime(self.model_path)
+            log.info("[Classifier] Model reloaded on request.")
+            return True
+        except Exception as e:
+            log.warning("[Classifier] Model reload failed: %s", e)
+            self.ml_ready = False
+            return False
 
 
 # ── Global Singleton ──────────────────────────────────────────────────────────

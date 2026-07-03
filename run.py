@@ -12,6 +12,9 @@ Production-grade startup:
 """
 
 import os
+from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import sys
 
 # ── Bootstrap logging BEFORE any other import ────────────────────────────────
@@ -29,6 +32,10 @@ from flask import Flask, render_template, request, jsonify
 from backend.core.engine import FocusEngine
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+# Initialize CORS with allowed origins (environment variable or default '*')
+CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
+# Initialize rate limiter (default 100 requests per minute per IP)
+limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["100 per minute"])
 
 # Secret key — generate a secure ephemeral key when env var is absent.
 # This is safe for a local-only tool: sessions won't survive restarts, but
@@ -53,6 +60,9 @@ app.secret_key = _secret_key
 import atexit as _atexit
 import threading as _threading
 import time as _time
+
+# Application start timestamp for health checks
+_START_TIME = _time.time()
 
 _engine: "FocusEngine | None" = None
 _engine_lock = _threading.Lock()
@@ -79,6 +89,19 @@ def _shutdown_engine():
         log.info("[run] Engine monitor stopped on shutdown.")
 
 
+def boot_engine() -> "FocusEngine":
+    """Initialize the FocusEngine singleton, purge old events, start pruning scheduler, and watchdog.
+
+    Called explicitly to avoid side‑effects at import time.
+    """
+    engine = get_engine()
+    engine.store.purge_old_events(days_to_keep=30)
+    _start_pruning_scheduler(engine)
+    _start_watchdog(engine)
+    log.info("[run] FocusEngine boot complete: initial purge, scheduler, and watchdog started.")
+    return engine
+
+
 def _start_pruning_scheduler(engine: FocusEngine) -> None:
     """
     Launch a daemon thread that calls purge_old_events() once every 24 hours.
@@ -96,6 +119,26 @@ def _start_pruning_scheduler(engine: FocusEngine) -> None:
 
     t = _threading.Thread(target=_loop, name="focuslock-pruner", daemon=True)
     t.start()
+
+# ── Integrity Watchdog ────────────────────────────────────────────────────────
+def _start_watchdog(engine: FocusEngine) -> None:
+    """Background thread that verifies store integrity every 5 minutes.
+    Logs warnings if integrity checks fail.
+    """
+    def _loop():
+        while True:
+            try:
+                valid, msg = engine.store.verify_integrity()
+                if not valid:
+                    log.warning("[run] Integrity watchdog detected issue: %s", msg)
+                else:
+                    log.debug("[run] Integrity watchdog check passed.")
+            except Exception as exc:
+                log.error("[run] Integrity watchdog exception: %s", exc)
+            _time.sleep(5 * 60)  # 5 minutes
+    t2 = _threading.Thread(target=_loop, name="focuslock-watchdog", daemon=True)
+    t2.start()
+    log.info("[run] Integrity watchdog started (interval=5m).")
     log.info("[run] Daily event pruner started (interval=24h, keep=30d).")
 
 
@@ -139,15 +182,7 @@ def check_api_key():
         return jsonify({"error": "API key required for non-loopback callers"}), 403
 
 
-@app.after_request
-def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGINS
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-API-KEY"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    # Mitigate XSS/Cross-Origin leaks by enforcing COEP alongside CORS
-    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
-    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    return response
+
 
 
 # ── Health Check ──────────────────────────────────────────────────────────────
@@ -155,7 +190,18 @@ def add_cors_headers(response):
 
 @app.route("/health")
 def health():
-    return {"status": "ok"}, 200
+    """Return health information including uptime, DB integrity, and model status."""
+    uptime = _time.time() - _START_TIME
+    engine = get_engine()
+    db_valid, db_msg = engine.store.verify_integrity()
+    model_status = getattr(engine, "classifier", None) is not None
+    return {
+        "status": "ok" if db_valid and model_status else "degraded",
+        "uptime_seconds": int(uptime),
+        "db_integrity": db_valid,
+        "db_message": db_msg,
+        "model_loaded": model_status,
+    }, 200
 
 
 # ── UI Routes ────────────────────────────────────────────────────────────────
@@ -193,6 +239,7 @@ def analytics():
 
 
 @app.route("/api/start", methods=["POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def api_start():
     data = request.get_json(silent=True) or {}
 
@@ -234,6 +281,7 @@ def api_start():
 
 
 @app.route("/api/continue", methods=["POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def api_continue():
     data = request.get_json(silent=True) or {}
     success = get_engine().extend_session(data.get("duration", 10))
@@ -241,6 +289,7 @@ def api_continue():
 
 
 @app.route("/api/stop", methods=["POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def api_stop():
     success = get_engine().stop_session()
     log.info("[run] Session stopped — success=%s", success)
@@ -248,6 +297,7 @@ def api_stop():
 
 
 @app.route("/api/afk", methods=["POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def api_afk():
     data = request.get_json(silent=True) or {}
     if data.get("status"):
@@ -264,6 +314,7 @@ def api_status():
 
 
 @app.route("/api/violation", methods=["POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def api_violation():
     data = request.get_json(silent=True) or {}
     get_engine().register_violation(data.get("type", "unknown"))
@@ -271,12 +322,14 @@ def api_violation():
 
 
 @app.route("/api/heartbeat", methods=["POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def api_heartbeat():
     get_engine().heartbeat()
     return jsonify({"status": "alive"})
 
 
 @app.route("/api/break", methods=["POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def api_break():
     data = request.get_json(silent=True) or {}
     get_engine().break_session(data.get("excuse", "No reason"))
@@ -284,6 +337,7 @@ def api_break():
 
 
 @app.route("/api/recovery/correct", methods=["POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def api_recovery_correct():
     # try_close_active_tab sends Ctrl+W to the foreground browser window,
     # closing only the active tab — never the entire browser window.
@@ -300,6 +354,7 @@ def api_recovery_correct():
 
 
 @app.route("/api/recovery/ignore", methods=["POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def api_recovery_ignore():
     engine = get_engine()
     engine.recovery_active = False
@@ -317,6 +372,7 @@ def api_integrity():
 
 
 @app.route("/api/feedback", methods=["POST"])
+@limiter.limit("10 per minute", methods=["POST"])
 def api_feedback():
     from backend.utils.logger import logger
 
@@ -368,6 +424,7 @@ def api_profile():
 
 
 @app.route("/api/profile/weights")
+@limiter.limit("10 per minute", methods=["GET"])
 def api_profile_weights():
     """Return effective merged heuristic weights for a given intent bucket.
 
@@ -387,19 +444,19 @@ def api_profile_weights():
         "user_deltas": user_deltas,
     })
 
+    @app.route("/api/reload_model", methods=["POST"])
+    @limiter.limit("5 per minute", methods=["POST"])
+    def api_reload_model():
+        """Reload the ML model on demand.
 
-# ── Application Startup ─────────────────────────────────────────────────────
-# Eagerly create the engine singleton so the monitor is running before the
-# first request arrives.  Run an immediate purge to clear any events older
-# than 30 days that accumulated since the last restart, then arm the daily
-# scheduler for long-running deployments.
-
-_boot_engine = get_engine()
-_boot_engine.store.purge_old_events(days_to_keep=30)
-_start_pruning_scheduler(_boot_engine)
-log.info("[run] FocusEngine singleton ready. Initial purge complete.")
-
-
+        Protected by the existing API‑key middleware.
+        Returns JSON with status "reloaded" or "failed".
+        """
+        success = clf.reload_classifier()
+        if success:
+            return jsonify({"status": "reloaded"}), 200
+        else:
+            return jsonify({"status": "failed"}), 500
 # ── Entry Point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -409,13 +466,14 @@ if __name__ == "__main__":
 
     log.info("[run] FocusLock starting — debug=%s", _debug_mode)
 
-    if _debug_mode and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+    # Initialise engine, purge old events, and start background pruning.
+    boot_engine()
 
+    if _debug_mode and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         def open_browser():
             time.sleep(1.5)
             webbrowser.open("http://127.0.0.1:5000/")
             log.info("[run] Browser opened.")
-
         Thread(target=open_browser, daemon=True).start()
 
     app.run(

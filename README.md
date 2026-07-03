@@ -1,5 +1,13 @@
 # 🧠 FocusLock — Intent-Aware Cognitive Behavior Engine
 
+## 📖 Project Overview & How It Works
+
+FocusLock is an AI‑powered productivity system that goes beyond traditional app blockers. It monitors the foreground window, extracts context (title, app, URL), and uses a hybrid heuristic + ML engine to decide whether the activity aligns with the user’s intent. The system classifies activity as **PRODUCTIVE**, **NEUTRAL**, or **DISTRACTION**, provides real‑time UI feedback, and learns from manual corrections to improve future predictions.
+
+> **Platform Notice**
+> **Windows** – Full UI‑automation (window focus, tab closing) works only on Windows.
+> **Linux/macOS** – Core backend runs, but UI‑automation is disabled.
+> **Optional ML** – Install `requirements-ml.txt` to enable the classifier; otherwise the engine falls back to heuristic‑only mode.
 FocusLock is an AI-powered productivity system that goes beyond traditional app blockers.
 Instead of blocking apps blindly, it analyzes **user intent, activity context, and behavioral patterns** to determine whether a user is truly distracted or still aligned with their goal.
 

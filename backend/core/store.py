@@ -43,6 +43,9 @@ class EventStore:
     # ── Schema ────────────────────────────────────────────────────────────────
 
     def _init_db(self):
+        # Ensure the parent directory exists before SQLite tries to open the file.
+        # sqlite3.connect() will NOT create intermediate directories itself.
+        os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
         with sqlite3.connect(DB_FILE) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS events (
