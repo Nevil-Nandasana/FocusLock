@@ -202,6 +202,82 @@ FocusLock/
 
 ---
 
+## 🛠️ Requirements
+
+Before running FocusLock, ensure you meet the following requirements:
+
+### Platform Support
+* **Windows** (Fully Supported): Required for window monitoring, active browser tab scraper (via COM UIAutomation), and focus enforcement/tab closing.
+* **macOS & Linux** (Partially Supported): Core backend runs and logs data, but UI-automation/enforcement is disabled.
+
+### Software Prerequisites
+* **Python**: Version `3.11` or higher.
+* **Flutter SDK** (Optional): Only required if running the Flutter desktop client.
+
+### Python Dependencies
+* **Core**: Flask, psutil, comtypes (Windows UIAutomation COM).
+* **Optional Machine Learning**: `sentence-transformers`, `scikit-learn`, `joblib`, `numpy` (needed for NLP intent-based classification; falls back to heuristic-only mode if omitted).
+
+---
+
+## 🚀 How to Run
+
+### 1. Set Up the Python Environment
+Clone the repository and set up a virtual environment:
+```bash
+# Clone the repository
+git clone <repository-url>
+cd FocusLock
+
+# Create and activate virtual environment
+python -m venv .venv
+# On Windows:
+.venv\Scripts\activate
+# On macOS/Linux:
+source .venv/bin/activate
+```
+
+### 2. Install Dependencies
+Choose one of the following installation modes:
+* **Core Heuristics Mode** (fast, no ML overhead):
+  ```bash
+  pip install -r requirements.txt
+  ```
+* **Hybrid ML Mode** (enables full semantic classification):
+  ```bash
+  pip install -e .[ml]
+  ```
+  *(Note: You can also uncomment the ML dependencies inside `requirements.txt` and run `pip install -r requirements.txt`)*
+
+### 3. Run the Backend & Web Client
+Start the Flask application:
+```bash
+python run.py
+```
+* The backend will start monitoring active windows.
+* Open your browser and navigate to **[http://127.0.0.1:5000/](http://127.0.0.1:5000/)** to access the system dashboard and real-time telemetry.
+* **Debug Mode**: Run with `FLASK_DEBUG=1` in your environment to enable debugger features, verbose logging, and automatic browser launch.
+
+### 4. Run the Flutter Companion Client (Optional)
+If you wish to run the Flutter desktop application:
+```bash
+cd focuslock_app
+flutter pub get
+flutter run -d windows
+```
+
+### 5. Running Tests & Verification
+Run unit tests to verify system stability:
+```bash
+# Run pytest tests
+pytest
+
+# Verify engine classifier performance and budget limits
+python scripts/verify.py
+```
+
+---
+
 ## 📊 Logging & Feedback
 
 FocusLock logs structured activity data:

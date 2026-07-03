@@ -8,39 +8,53 @@ on:
 
 jobs:
   test-windows:
+    name: Test on Windows (Python ${{ matrix.python-version }})
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
+
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          # Install project in editable mode to pick up local packages
-          pip install -e .
+          pip install -e .[ml,dev]
+
       - name: Run tests
         run: |
-          python -m pytest tests -v
+          pytest tests -v
 
   test-linux:
+    name: Test on Linux (Heuristics-only)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
+
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -e .
+          pip install -e .[dev]
+
       - name: Verify cross-platform import safety
         run: |
           python -c "import backend.core.window_utils as wu; print('window_utils import OK')"
+
       - name: Run tests
         run: |
-          python -m pytest tests -v
+          pytest tests -v
