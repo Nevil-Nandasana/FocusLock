@@ -245,7 +245,7 @@ Choose one of the following installation modes:
   ```
 * **Hybrid ML Mode** (enables full semantic classification):
   ```bash
-  pip install -e .[ml]
+    pip install -r requirements.txt
   ```
   *(Note: You can also uncomment the ML dependencies inside `requirements.txt` and run `pip install -r requirements.txt`)*
 

@@ -19,9 +19,6 @@ import logging
 import os
 import threading
 import time
-
-import numpy as np
-
 from backend.utils.user_profile import user_profile
 from backend.ml.intent_engine import IntentProfile
 
@@ -41,6 +38,13 @@ class FeatureClassifier:
         self._model_mtime = 0
         self._model_lock = threading.Lock()
 
+        # Class-level executor (not per-call) so shutdown(wait=True) doesn't
+        # block the caller after a TimeoutError.  max_workers=1 keeps it
+        # equivalent to the original design.
+        self._ml_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="focuslock-ml"
+        )
+
         # Cached label from the most recent _run_ml_pipeline() call.
         # Initialised to NEUTRAL so prob_to_label() is always safe to call.
         self._last_ml_label: str = "NEUTRAL"
@@ -50,9 +54,12 @@ class FeatureClassifier:
         self._load_lock    = threading.Lock()
 
     def _reload_model_if_updated(self):
-        if not self.ml_ready:
-            return
+        """Check model file mtime and reload if updated.
 
+        NOTE: Does NOT early-return when ml_ready is False so that a freshly
+        trained model on a clean install is automatically picked up without
+        requiring a process restart.
+        """
         if not os.path.exists(self.model_path):
             return
 
@@ -198,7 +205,9 @@ class FeatureClassifier:
         intent_match      = False
 
         if intent_profile and intent_profile.strength > 0:
-            result            = intent_profile.score_activity(full_text)
+            result            = intent_profile.score_activity(
+                full_text, app_name=context.get("app", "")
+            )
             intent_boost      = result["intent_boost"]
             negative_override = result["negative_override"]
             intent_reason     = result["intent_reason"]
@@ -218,25 +227,29 @@ class FeatureClassifier:
         ml_prob             = 0.0
 
         if self.embedder is not None and self.util is not None:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                # --- Feature alignment with train_model.py ---
-                # TF-IDF was trained on `window_title` only; pass the raw title
-                # (not the richer normalized_text) to keep vocabulary consistent.
-                title_text   = context.get("title", "")
-                # mode_encoded must use the same mapping as training:
-                #   deep=2, normal=1, drift=0 (default to 1 / normal if unknown)
-                mode_encoded = {"deep": 2, "normal": 1, "drift": 0}.get(
-                    (mode or "").lower(), 1
-                )
-                future      = executor.submit(
-                    self._run_ml_pipeline, intent, full_text, title_text, mode_encoded
-                )
-                elapsed_ms  = (time.time() - start_time) * 1000
-                budget_left = max(0.0, 100.0 - elapsed_ms) / 1000.0
-                try:
-                    semantic_similarity, ml_prob = future.result(timeout=budget_left)
-                except concurrent.futures.TimeoutError:
-                    log.debug("[Classifier] Budget exceeded — falling back to heuristics.")
+            # —— Feature alignment with train_model.py ——
+            # TF-IDF was trained on `window_title` only; pass the raw title
+            # (not the richer normalized_text) to keep vocabulary consistent.
+            title_text   = context.get("title", "")
+            # mode_encoded must use the same mapping as training:
+            #   deep=2, normal=1, drift=0 (default to 1 / normal if unknown)
+            mode_encoded = {"deep": 2, "normal": 1, "drift": 0}.get(
+                (mode or "").lower(), 1
+            )
+            # Submit to the class-level executor (never used as context manager
+            # so shutdown(wait=True) is NOT called after a TimeoutError).
+            future      = self._ml_executor.submit(
+                self._run_ml_pipeline, intent, full_text, title_text, mode_encoded
+            )
+            elapsed_ms  = (time.time() - start_time) * 1000
+            budget_left = max(0.0, 100.0 - elapsed_ms) / 1000.0
+            try:
+                semantic_similarity, ml_prob = future.result(timeout=budget_left)
+            except concurrent.futures.TimeoutError:
+                log.debug("[Classifier] Budget exceeded — falling back to heuristics.")
+                # Detach the future: don't cancel (can't stop a running thread),
+                # but don't block waiting for it either.
+                future.cancel()
 
         # ── 6. Confidence Calibration ─────────────────────────────────────────
         if is_whitelist or is_blacklist or negative_override:
@@ -338,6 +351,7 @@ class FeatureClassifier:
 
         if self.ml_ready and self.model and self.tfidf:
             try:
+                import numpy as np
                 # Use `title` (= window_title) — the same text source the
                 # TF-IDF vectorizer was fitted on during training.
                 tfidf_vec = self.tfidf.transform([title]).toarray()
@@ -356,12 +370,20 @@ class FeatureClassifier:
 
     def prob_to_label(self, prob: float, features: dict) -> str:
         """
-        Return the ML-predicted label for the most recent extract_features() call.
+        Return the ML-predicted label paired with *prob*.
 
-        Uses the label cached by _run_ml_pipeline() to avoid re-running the
-        model.  Returns 'NEUTRAL' if the model has not run yet or failed.
+        Computes the label from the model's classes_ directly using the probs
+        returned by the most recent _run_ml_pipeline() call.  Falls back to
+        NEUTRAL if the model has not run or the cached label is unavailable.
+
+        NOTE: ``features`` is kept as a parameter for API compatibility even
+        though it is not used here; callers may still pass it.
         """
-        return self._last_ml_label
+        # _run_ml_pipeline caches the winning label in self._last_ml_label.
+        # Returning it here is safe because prob_to_label() is always called
+        # from the same call-chain that just ran _run_ml_pipeline() via
+        # future.result() — there is no concurrent writer at this point.
+        return self._last_ml_label if self.ml_ready else "NEUTRAL"
 
     def reload_classifier(self) -> bool:
         """Force reload of the ML model from disk.

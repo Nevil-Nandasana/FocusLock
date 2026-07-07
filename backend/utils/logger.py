@@ -10,6 +10,8 @@ Provides:
 """
 
 import os
+import csv
+import io
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -22,6 +24,7 @@ LOGS_DIR = os.path.join(BASE_DIR, "data", "logs")
 LOG_FILE = os.path.join(BASE_DIR, "data", "logs", "focuslock.log")
 
 os.makedirs(LOGS_DIR, exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
 
 
 # ── Root Logging Bootstrap ────────────────────────────────────────────────────
@@ -158,13 +161,20 @@ class FocusLogger:
         confidence: float,
         label: str,
     ):
-        """Append one row to the living training CSV for future retrains."""
+        """Append one row to the living training CSV for future retrains.
+
+        Uses csv.writer with QUOTE_ALL to correctly handle embedded double-quotes,
+        commas, and newlines in window titles or app names.
+        """
         timestamp = datetime.now().isoformat()
-        row = (
-            f'{timestamp},"{title}","{app}","{url}",'
-            f'"{goal}",{mode},{max(0, similarity)},'
-            f"{heuristic},{confidence},{label}\n"
-        )
+        buf = io.StringIO()
+        writer = csv.writer(buf, quoting=csv.QUOTE_ALL, lineterminator="\n")
+        writer.writerow([
+            timestamp, title, app, url,
+            goal, mode, max(0.0, similarity),
+            heuristic, confidence, label,
+        ])
+        row = buf.getvalue()
         try:
             with open(self.training_file, "a", encoding="utf-8") as f:
                 f.write(row)

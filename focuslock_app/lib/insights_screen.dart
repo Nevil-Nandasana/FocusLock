@@ -17,6 +17,7 @@ class InsightsScreen extends ConsumerStatefulWidget {
 class _InsightsScreenState extends ConsumerState<InsightsScreen> {
   Map<String, dynamic>? _profile;
   Map<String, dynamic>? _integrity;
+  Map<String, dynamic>? _analytics;
   String? _error;
   bool _loading = true;
 
@@ -34,6 +35,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
 
     final profile = await ApiService.getProfile();
     final integrity = await ApiService.getIntegrity();
+    final analytics = await ApiService.getAnalytics();
     await ref.read(statusProvider.notifier).refreshNow();
 
     if (!mounted) {
@@ -51,6 +53,7 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
     setState(() {
       _profile = profile;
       _integrity = integrity;
+      _analytics = analytics.containsKey('error') ? null : analytics;
       _loading = false;
     });
   }
@@ -161,6 +164,20 @@ class _InsightsScreenState extends ConsumerState<InsightsScreen> {
                         'prediction': status['prediction'],
                         'paused': status['paused'],
                       }),
+                    ),
+                    const SizedBox(height: 12),
+                    _DetailsCard(
+                      title: 'Historical Distraction Data',
+                      content: _analytics != null
+                          ? _formatMap({
+                              'Total Sessions': _analytics!['total_sessions'],
+                              'Completed': _analytics!['total_completed'],
+                              'Broken': _analytics!['total_broken'],
+                              'Violations': _analytics!['total_violations'],
+                              'Distractions': _analytics!['total_distractions'],
+                              'Success Rate': '${_analytics!["success_rate"]}%',
+                            })
+                          : 'No historical data available.',
                     ),
                     const SizedBox(height: 16),
                     PrimaryButton(

@@ -232,6 +232,14 @@ class _UIA:
 # Module-level UIA singleton (per-process)
 _uia = _UIA()
 
+# ── Cached comtypes IUIAutomation interface ────────────────────────────────────
+# CreateObject() is expensive — cache the result across all poll cycles so it
+# is only called once per process (or after a fatal COM error that resets it).
+import threading as _threading_tab  # noqa: E402 — needed here to avoid circular import issues
+_cached_uia_iface  = None
+_cached_uia_module = None
+_uia_iface_lock    = _threading_tab.Lock()
+
 
 # ── Public scraping function ───────────────────────────────────────────────────
 
@@ -289,22 +297,39 @@ def _scrape_via_comtypes(hwnd: int, deadline: float) -> Optional[str]:
     """
     Use comtypes (if installed) to walk the UIA tree for the address bar.
     Raises ImportError if comtypes is unavailable; caller catches and falls through.
+
+    The IUIAutomation COM object is created once and cached at module level
+    (``_cached_uia_iface``).  Subsequent calls reuse the same object so
+    ``comtypes.client.CreateObject()`` is NOT called every poll cycle.
     """
-    import comtypes.client                                        # noqa: PLC0415
-    import comtypes                                               # noqa: PLC0415
+    global _cached_uia_iface, _cached_uia_module, _uia_iface_lock
 
-    uia = comtypes.client.CreateObject(
-        "{ff48dba4-60ef-4201-aa87-54103eef594e}",
-        interface=comtypes.IUnknown,
-    )
-    # Bring in the generated UIA interfaces
-    try:
-        from comtypes.gen import UIAutomationClient as _UIA      # noqa: PLC0415
-    except ImportError:
-        comtypes.client.GetModule("UIAutomationCore.dll")
-        from comtypes.gen import UIAutomationClient as _UIA      # noqa: PLC0415
+    # Fast path — use cached interface
+    with _uia_iface_lock:
+        uia_iface = _cached_uia_iface
+        _UIA = _cached_uia_module
 
-    uia_iface = uia.QueryInterface(_UIA.IUIAutomation)
+    if uia_iface is None:
+        # First-time initialisation (only reaches here once per process)
+        import comtypes.client                                        # noqa: PLC0415
+        import comtypes                                               # noqa: PLC0415
+
+        uia_raw = comtypes.client.CreateObject(
+            "{ff48dba4-60ef-4201-aa87-54103eef594e}",
+            interface=comtypes.IUnknown,
+        )
+        # Bring in the generated UIA interfaces
+        try:
+            from comtypes.gen import UIAutomationClient as _UIA      # noqa: PLC0415
+        except ImportError:
+            comtypes.client.GetModule("UIAutomationCore.dll")
+            from comtypes.gen import UIAutomationClient as _UIA      # noqa: PLC0415
+
+        uia_iface = uia_raw.QueryInterface(_UIA.IUIAutomation)
+
+        with _uia_iface_lock:
+            _cached_uia_iface  = uia_iface
+            _cached_uia_module = _UIA
 
     # Get element from HWND
     elem = uia_iface.ElementFromHandle(hwnd)

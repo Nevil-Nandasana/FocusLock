@@ -86,6 +86,15 @@ class FocusEngine:
         # ── Background ML training orchestrator ───────────────────────────────
         self.learning_manager = LearningManager()
 
+        # ── WARNING escalation tracking ────────────────────────────────────────────
+        # If WARNING persists for >WARNING_ESCALATION_SEC without a new window
+        # change event, a background timer re-runs classification against the
+        # current window so prolonged distractions eventually escalate.
+        self._warning_since: float = 0.0
+        self._last_raw_state: dict = {}
+        self._warning_timer: threading.Timer | None = None
+        self.WARNING_ESCALATION_SEC = 30
+
         self._check_resume_session()
 
     # ── Session Management ────────────────────────────────────────────────────
@@ -173,10 +182,18 @@ class FocusEngine:
         if self.active_monitor:
             self.active_monitor.stop()
 
-        self.active_monitor = WindowMonitor(
-            callback_state_change=self._on_state_change
-        )
-        self.active_monitor.start()
+        try:
+            self.active_monitor = WindowMonitor(
+                callback_state_change=self._on_state_change
+            )
+            self.active_monitor.start()
+        except NotImplementedError as exc:
+            log.warning(
+                "[Engine] Window monitoring disabled on this platform: %s. "
+                "API, logging, and dashboard will continue running normally.",
+                exc,
+            )
+            self.active_monitor = None
 
     # ── Event-Driven Classification Pipeline ─────────────────────────────────
 
@@ -309,6 +326,21 @@ class FocusEngine:
             }
             last_intervention = self.last_intervention_timestamp
 
+            # ── WARNING escalation timer management ──────────────────────────────
+            # Record when we entered WARNING so the timer can fire if we stay here.
+            if final_state == "WARNING" and self.last_state != "WARNING":
+                self._warning_since = now
+                self._last_raw_state = raw_state
+                self._schedule_warning_escalation()
+            elif final_state != "WARNING":
+                self._warning_since = 0.0
+                self._cancel_warning_escalation()
+
+            # Auto-reset recovery overlay when user returns to PRODUCTIVE
+            if final_state == "PRODUCTIVE" and self.recovery_active:
+                self.recovery_active = False
+                log.info("[Engine] User returned to PRODUCTIVE — recovery overlay cleared.")
+
         # Track apps for end-of-session auto-learning
         app_name = (raw_state.get("app") or "").lower().split(".")[0]
         if app_name:
@@ -371,7 +403,7 @@ class FocusEngine:
                 logger.log_training_row(
                     title      = raw_state.get("title", ""),
                     app        = raw_state.get("app", ""),
-                    url        = "",
+                    url        = raw_state.get("url", ""),
                     goal       = session.get("intent", ""),
                     mode       = session.get("mode", "normal"),
                     similarity = features.get("semantic_similarity", 0),
@@ -381,6 +413,47 @@ class FocusEngine:
                 )
             except Exception as exc:
                 log.debug("[Engine] log_training_row failed: %s", exc)
+
+    # ── WARNING Escalation Helpers ───────────────────────────────────────────────
+
+    def _schedule_warning_escalation(self):
+        """Start a one-shot timer that re-fires classification if WARNING persists."""
+        self._cancel_warning_escalation()
+        self._warning_timer = threading.Timer(
+            self.WARNING_ESCALATION_SEC, self._escalate_warning_if_stuck
+        )
+        self._warning_timer.daemon = True
+        self._warning_timer.start()
+
+    def _cancel_warning_escalation(self):
+        """Cancel any pending WARNING escalation timer."""
+        if self._warning_timer is not None:
+            self._warning_timer.cancel()
+            self._warning_timer = None
+
+    def _escalate_warning_if_stuck(self):
+        """Called by the timer if WARNING hasn’t cleared in WARNING_ESCALATION_SEC seconds.
+
+        Re-runs classification against the last known raw_state so a prolonged
+        WARNING on a distracting window can escalate to DISTRACTION without
+        requiring a new window-change event to trigger the callback.
+        """
+        with self._lock:
+            if self.current_state != "WARNING":
+                return  # already resolved
+            raw = dict(self._last_raw_state)
+
+        log.info(
+            "[Engine] WARNING persisted for >%ds without new event — "
+            "re-running classification for escalation.",
+            self.WARNING_ESCALATION_SEC,
+        )
+        # Re-invoke the state change handler with the last known raw state.
+        # This may escalate WARNING → DISTRACTION if the window is still distraction.
+        try:
+            self._on_state_change(raw)
+        except Exception as exc:
+            log.debug("[Engine] _escalate_warning_if_stuck failed: %s", exc)
 
     # ── Status ────────────────────────────────────────────────────────────────
 

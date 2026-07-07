@@ -31,6 +31,9 @@ log = logging.getLogger(__name__)
 from flask import Flask, render_template, request, jsonify
 from backend.core.engine import FocusEngine
 
+# Optional CORS control
+ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
+
 app = Flask(__name__, template_folder="templates", static_folder="static")
 # Initialize CORS with allowed origins (environment variable or default '*')
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
@@ -92,13 +95,14 @@ def _shutdown_engine():
 def boot_engine() -> "FocusEngine":
     """Initialize the FocusEngine singleton, purge old events, start pruning scheduler, and watchdog.
 
-    Called explicitly to avoid side‑effects at import time.
+    Called explicitly to avoid side-effects at import time.
     """
     engine = get_engine()
     engine.store.purge_old_events(days_to_keep=30)
     _start_pruning_scheduler(engine)
     _start_watchdog(engine)
-    log.info("[run] FocusEngine boot complete: initial purge, scheduler, and watchdog started.")
+    _start_backup_scheduler()
+    log.info("[run] FocusEngine boot complete: initial purge, scheduler, watchdog, and backup started.")
     return engine
 
 
@@ -142,12 +146,38 @@ def _start_watchdog(engine: FocusEngine) -> None:
     log.info("[run] Daily event pruner started (interval=24h, keep=30d).")
 
 
+# ── Backup Scheduler ─────────────────────────────────────────────────────────
+def _start_backup_scheduler() -> None:
+    """Launch a daemon thread that calls create_backup() once every 24 hours.
+    Runs an initial backup at startup to ensure there is always at least one.
+    """
+    from backend.utils.backup import create_backup
+
+    def _loop():
+        # Initial backup at startup
+        try:
+            path = create_backup()
+            log.info("[run] Initial backup created at: %s", path)
+        except Exception as exc:
+            log.warning("[run] Initial backup failed: %s", exc)
+        while True:
+            _time.sleep(24 * 60 * 60)   # sleep 24 h before next run
+            try:
+                path = create_backup()
+                log.info("[run] Daily backup created at: %s", path)
+            except Exception as exc:
+                log.warning("[run] Daily backup failed: %s", exc)
+
+    t = _threading.Thread(target=_loop, name="focuslock-backup", daemon=True)
+    t.start()
+    log.info("[run] Daily backup scheduler started (interval=24h).")
+
+
 # API key configuration and loopback allow-set.
 _API_KEY   = os.environ.get("FOCUSLOCK_API_KEY", "").strip()
 _LOOPBACK  = frozenset({"127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"})
 
-# Optional CORS control
-ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
+# Optional CORS control (defined above)
 
 
 # ── Security Middleware ───────────────────────────────────────────────────────
@@ -222,6 +252,7 @@ def analytics():
     total = sum(1 for e in events if e["type"] == "SESSION_START")
     broken = sum(1 for e in events if e["type"] == "SESSION_BROKEN")
     predicted = sum(1 for e in events if e["type"] == "FAILURE_PREDICTED")
+    total_violations = sum(1 for e in events if e["type"] == "FOCUS_VIOLATION")
 
     rate = 0 if total == 0 else int(((total - broken) / total) * 100)
 
@@ -232,6 +263,7 @@ def analytics():
         failures=broken,
         success_rate=rate,
         predicted=predicted,
+        total_violations=total_violations,
     )
 
 
@@ -444,19 +476,59 @@ def api_profile_weights():
         "user_deltas": user_deltas,
     })
 
-    @app.route("/api/reload_model", methods=["POST"])
-    @limiter.limit("5 per minute", methods=["POST"])
-    def api_reload_model():
-        """Reload the ML model on demand.
 
-        Protected by the existing API‑key middleware.
-        Returns JSON with status "reloaded" or "failed".
-        """
-        success = clf.reload_classifier()
-        if success:
-            return jsonify({"status": "reloaded"}), 200
-        else:
-            return jsonify({"status": "failed"}), 500
+@app.route("/api/reload_model", methods=["POST"])
+@limiter.limit("5 per minute", methods=["POST"])
+def api_reload_model():
+    """Reload the ML model on demand.
+
+    Protected by the existing API-key middleware.
+    Returns JSON with status "reloaded" or "failed".
+    """
+    from backend.ml.classifier import classifier as clf
+    success = clf.reload_classifier()
+    if success:
+        return jsonify({"status": "reloaded"}), 200
+    else:
+        return jsonify({"status": "failed"}), 500
+
+
+@app.route("/api/analytics")
+def api_analytics():
+    """Return historical analytics data as JSON.
+
+    Includes aggregate session counts, violation counts, distraction counts,
+    success rate, and a summary of recent events.
+    """
+    from backend.core.store import EventStore
+
+    store = EventStore()
+    events = store.get_events()
+
+    total_sessions     = sum(1 for e in events if e["type"] == "SESSION_START")
+    total_broken       = sum(1 for e in events if e["type"] == "SESSION_BROKEN")
+    total_completed    = sum(1 for e in events if e["type"] == "SESSION_COMPLETE")
+    total_violations   = sum(1 for e in events if e["type"] == "FOCUS_VIOLATION")
+    total_distractions = total_violations  # each violation maps to one detected distraction
+    success_rate       = (
+        int((total_completed / total_sessions) * 100) if total_sessions > 0 else 0
+    )
+
+    # Recent events (last 50, newest first)
+    recent_events = [
+        {"type": e["type"], "timestamp": e["timestamp"]}
+        for e in reversed(events[-50:])
+    ]
+
+    return jsonify({
+        "total_sessions":     total_sessions,
+        "total_violations":   total_violations,
+        "total_distractions": total_distractions,
+        "total_broken":       total_broken,
+        "total_completed":    total_completed,
+        "success_rate":       success_rate,
+        "recent_events":      recent_events,
+    })
 # ── Entry Point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

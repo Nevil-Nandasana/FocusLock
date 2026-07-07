@@ -212,7 +212,7 @@ class ApiService {
   /// Post a manual feedback signal to [/api/feedback].
   /// [label] must be 'PRODUCTIVE' or 'DISTRACTION'.
   /// [concept] is typically the app name or a keyword concept.
-  static Future<bool> submitFeedback({
+  static Future<Map<String, dynamic>> submitFeedback({
     required String concept,
     required String label,
   }) async {
@@ -221,9 +221,20 @@ class ApiService {
         'feedback',
         body: {'app': concept, 'title': '', 'label': label},
       );
-      return _isSuccess(response);
+      return _isSuccess(response) ? response : {'error': 'Feedback failed'};
     } catch (e) {
-      return false;
+      return {'error': e.toString()};
+    }
+  }
+
+  /// Fetch historical analytics from [/api/analytics].
+  /// Returns {total_sessions, total_violations, total_distractions,
+  ///          total_broken, total_completed, success_rate, recent_events}.
+  static Future<Map<String, dynamic>> getAnalytics() async {
+    try {
+      return await _get('analytics');
+    } catch (e) {
+      return {'error': e.toString()};
     }
   }
 }

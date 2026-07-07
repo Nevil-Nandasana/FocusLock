@@ -199,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state === "PRODUCTIVE") mainContainer?.classList.add('focus-animate');
         if (state === "WARNING") mainContainer?.classList.add('state-drift');
         if (state === "DISTRACTION") mainContainer?.classList.add('state-danger');
-        
+
         if (status.recovery_active) {
             violationOverlay?.classList.remove('hidden');
             if (distReason && status.recovery_snapshot) {
@@ -207,6 +207,22 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } else {
             violationOverlay?.classList.add('hidden');
+        }
+
+        // ─── Warning Toast ───
+        // Show when state is WARNING (soft alert, no overlay); hide otherwise.
+        if (state === "WARNING") {
+            warningToast?.classList.remove('hidden');
+            warningEdge?.classList.remove('hidden');
+            if (warningReason) {
+                const snap = status.activity_snapshot;
+                warningReason.textContent = (snap && snap.reason)
+                    ? snap.reason
+                    : "Potential distraction detected.";
+            }
+        } else {
+            warningToast?.classList.add('hidden');
+            warningEdge?.classList.add('hidden');
         }
 
         localRemaining = status.remaining;

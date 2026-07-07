@@ -7,8 +7,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
 BACKUP_DIR = DATA_DIR / "backups"
-DB_FILE = DATA_DIR / "focuslock.db"
-MODEL_FILE = DATA_DIR / "focus_model.pkl"
+DB_FILE = DATA_DIR / "db" / "focuslock.db"
+MODEL_FILE = DATA_DIR / "ml" / "focus_model.pkl"
 
 def _ensure_backup_dir() -> None:
     """Create the backup directory if it does not exist."""

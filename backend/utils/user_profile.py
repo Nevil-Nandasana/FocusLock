@@ -35,11 +35,11 @@ DEFAULT_PROFILES = {
         "code": 15, "github": 15, "vs code": 20, "pycharm": 20,
         "debug": 20, "docs": 15, "stackoverflow": 20,
         "aws": 10, "azure": 10, "cloud": 10,
-        "youtube": -10, "netflix": -30, "twitch": -25, "video": -10,
+        "youtube": -20, "netflix": -30, "twitch": -25, "video": -15,
         "movie": -20, "twitter": -20, "facebook": -20, "instagram": -25,
         "tiktok": -40, "reddit": -15, "game": -30, "steam": -30,
         "discord": 0,
-        "shopping": -20, "amazon": -15, "news": -10,
+        "shopping": -20, "amazon": -15, "news": -15,
     },
     "coding": {
         "pycharm": 25, "vs code": 25, "vscode": 25, "github": 20,

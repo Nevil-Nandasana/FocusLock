@@ -5,7 +5,7 @@
     <h1>System Analytics</h1>
     <p class="subtitle">Pattern Recognition & Behavioral Audit</p>
     
-    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 2rem;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; margin-bottom: 2rem;">
         <div style="background: rgba(0,0,0,0.3); padding: 1rem; text-align: center;">
             <div style="font-size: 2rem; font-weight: 900; color: var(--color-primary);">{{ total_sessions }}</div>
             <div class="subtitle" style="margin:0;">Total Sessions</div>
@@ -13,6 +13,10 @@
         <div style="background: rgba(0,0,0,0.3); padding: 1rem; text-align: center;">
             <div style="font-size: 2rem; font-weight: 900; color: var(--color-danger);">{{ failures }}</div>
             <div class="subtitle" style="margin:0;">Broken</div>
+        </div>
+        <div style="background: rgba(0,0,0,0.3); padding: 1rem; text-align: center;">
+            <div style="font-size: 2rem; font-weight: 900; color: #f59e0b;">{{ total_violations }}</div>
+            <div class="subtitle" style="margin:0;">Violations</div>
         </div>
         <div style="background: rgba(0,0,0,0.3); padding: 1rem; text-align: center;">
             <div style="font-size: 2rem; font-weight: 900; color: #fff;">{{ success_rate }}%</div>
