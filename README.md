@@ -256,6 +256,7 @@ python run.py
 ```
 * The backend will start monitoring active windows.
 * Open your browser and navigate to **[http://127.0.0.1:5000/](http://127.0.0.1:5000/)** to access the system dashboard and real-time telemetry.
+* **Persistent Sessions**: FocusLock automatically generates and saves a secure secret key to `data/secret.key` to keep your sessions active across restarts. You can also explicitly set the `FLASK_SECRET_KEY` environment variable.
 * **Debug Mode**: Run with `FLASK_DEBUG=1` in your environment to enable debugger features, verbose logging, and automatic browser launch.
 
 ### 4. Run the Flutter Companion Client (Optional)

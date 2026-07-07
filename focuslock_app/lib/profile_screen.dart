@@ -87,12 +87,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   Future<void> _sendFeedback(String concept, String label) async {
     setState(() => _pending[concept] = true);
 
-    final ok = await ApiService.submitFeedback(concept: concept, label: label);
+    final response = await ApiService.submitFeedback(concept: concept, label: label);
 
     if (!mounted) return;
     setState(() => _pending.remove(concept));
 
-    if (ok) {
+    if (!response.containsKey('error')) {
       // Optimistic local update so the UI reflects the change immediately
       // without waiting for a full re-fetch.
       final rate = 8; // LEARNING_RATE_MANUAL from backend
@@ -323,7 +323,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: _buckets.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (context, index) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           final bucket = _buckets[index];
           final selected = bucket == _selectedBucket;

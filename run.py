@@ -40,17 +40,23 @@ CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
 # Initialize rate limiter (default 100 requests per minute per IP)
 limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["100 per minute"], storage_uri="memory://")
 
-# Secret key — generate a secure ephemeral key when env var is absent.
-# This is safe for a local-only tool: sessions won't survive restarts, but
-# the key is never predictable.  Set FLASK_SECRET_KEY for stable sessions.
+# Secret key — generate and persist a secure key if not provided in environment.
 _secret_key = os.environ.get("FLASK_SECRET_KEY", "").strip()
 if not _secret_key:
-    import secrets as _secrets
-    _secret_key = _secrets.token_hex(32)
-    log.warning(
-        "[run] FLASK_SECRET_KEY not set — using a per-process ephemeral key. "
-        "Set FLASK_SECRET_KEY in your environment for stable Flask sessions."
-    )
+    _key_path = os.path.join(os.path.dirname(__file__), "data", "secret.key")
+    if os.path.exists(_key_path):
+        with open(_key_path, "r", encoding="utf-8") as f:
+            _secret_key = f.read().strip()
+    
+    if not _secret_key:
+        import secrets as _secrets
+        _secret_key = _secrets.token_hex(32)
+        os.makedirs(os.path.dirname(_key_path), exist_ok=True)
+        with open(_key_path, "w", encoding="utf-8") as f:
+            f.write(_secret_key)
+        log.info(
+            "[run] Generated a new stable FLASK_SECRET_KEY and saved to %s.", _key_path
+        )
 app.secret_key = _secret_key
 
 

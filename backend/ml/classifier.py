@@ -238,15 +238,17 @@ class FeatureClassifier:
             )
             # Submit to the class-level executor (never used as context manager
             # so shutdown(wait=True) is NOT called after a TimeoutError).
+            cancel_event = threading.Event()
             future      = self._ml_executor.submit(
-                self._run_ml_pipeline, intent, full_text, title_text, mode_encoded
+                self._run_ml_pipeline, intent, full_text, title_text, mode_encoded, cancel_event
             )
             elapsed_ms  = (time.time() - start_time) * 1000
             budget_left = max(0.0, 100.0 - elapsed_ms) / 1000.0
             try:
                 semantic_similarity, ml_prob = future.result(timeout=budget_left)
             except concurrent.futures.TimeoutError:
-                log.debug("[Classifier] Budget exceeded — falling back to heuristics.")
+                log.warning("[Classifier] ML budget exceeded %dms — falling back to heuristics.", int(budget_left*1000))
+                cancel_event.set()
                 # Detach the future: don't cancel (can't stop a running thread),
                 # but don't block waiting for it either.
                 future.cancel()
@@ -328,6 +330,7 @@ class FeatureClassifier:
         text:         str,
         title:        str,
         mode_encoded: int,
+        cancel_event: threading.Event,
     ) -> tuple[float, float]:
         """Runs SentenceTransformer + Scikit-Learn inside the 100 ms budget.
 
@@ -344,12 +347,15 @@ class FeatureClassifier:
 
         try:
             g_emb = self.embedder.encode(intent, convert_to_tensor=True)
+            if cancel_event.is_set(): return sim, prob
             t_emb = self.embedder.encode(text,   convert_to_tensor=True)
+            if cancel_event.is_set(): return sim, prob
             sim   = max(0.0, self.util.cos_sim(g_emb, t_emb).item())
         except Exception:
             pass
 
         if self.ml_ready and self.model and self.tfidf:
+            if cancel_event.is_set(): return sim, prob
             try:
                 import numpy as np
                 # Use `title` (= window_title) — the same text source the

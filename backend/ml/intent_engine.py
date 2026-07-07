@@ -37,6 +37,8 @@ DOMAIN_VOCAB = {
             "ship",
             "compile",
             "integrate",
+            "interview",
+            "competitive",
         ],
         "subjects": [
             "python",
@@ -63,6 +65,8 @@ DOMAIN_VOCAB = {
             "endpoint",
             "migration",
             "schema",
+            "leetcode",
+            "dsa",
         ],
         "positive_signals": [
             "pycharm",
@@ -384,9 +388,24 @@ DOMAIN_VOCAB = {
             "reddit",
         ],
     },
+    "global": {
+        "negative_signals": [
+            "youtube",
+            "netflix",
+            "tiktok",
+            "reddit",
+            "instagram",
+            "twitter",
+            "facebook",
+            "steam",
+            "twitch",
+            "snapchat",
+            "amazon",
+            "pinterest",
+        ]
+    },
 }
 
-# Canonical one-word aliases → intent_key
 INTENT_ALIASES = {
     # coding
     "code": "coding",
@@ -398,6 +417,9 @@ INTENT_ALIASES = {
     "dev": "coding",
     "software": "coding",
     "engineering": "coding",
+    "leetcode": "coding",
+    "dsa": "coding",
+    "algorithm": "coding",
     # design
     "design": "design",
     "ui": "design",
@@ -590,6 +612,12 @@ class IntentEngine:
         positive_signals = list(domain.get("positive_signals", []))
         negative_signals = list(domain.get("negative_signals", []))
 
+        # Merge global defaults if not explicitly removed
+        global_negatives = DOMAIN_VOCAB.get("global", {}).get("negative_signals", [])
+        for gn in global_negatives:
+            if gn not in negative_signals:
+                negative_signals.append(gn)
+
         # Augment positives with explicit meaningful tokens from the intent text
         for token in tokens:
             if (
@@ -697,6 +725,7 @@ class IntentEngine:
             positive_signals=[],
             # Always block hard distractions even without specific intent
             negative_signals=[
+                "youtube",
                 "tiktok",
                 "instagram",
                 "netflix",
