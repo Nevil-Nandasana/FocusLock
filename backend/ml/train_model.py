@@ -107,7 +107,7 @@ def train_model(data: list | None = None) -> dict:
             continue
 
         try:
-            raw = pd.read_csv(path)
+            raw = pd.read_csv(path, on_bad_lines='skip')
             norm = _normalize_training_frame(raw, name)
             if not norm.empty:
                 frames.append(norm)
@@ -213,6 +213,6 @@ if __name__ == "__main__":
     result = train_model()
 
     if result:
-        print(f"\n✅ Training complete: {result}")
+        print(f"\nTraining complete: {result}")
     else:
         print("\n❌ Training failed")

@@ -38,7 +38,7 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 # Initialize CORS with allowed origins (environment variable or default '*')
 CORS(app, resources={r"/api/*": {"origins": ALLOWED_ORIGINS}})
 # Initialize rate limiter (default 100 requests per minute per IP)
-limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["100 per minute"])
+limiter = Limiter(app=app, key_func=get_remote_address, default_limits=["100 per minute"], storage_uri="memory://")
 
 # Secret key — generate a secure ephemeral key when env var is absent.
 # This is safe for a local-only tool: sessions won't survive restarts, but

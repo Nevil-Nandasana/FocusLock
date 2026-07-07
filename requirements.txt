@@ -8,9 +8,10 @@ psutil>=6.0.0
 comtypes>=1.4.0          # Windows UIAutomation COM (tab_url_scraper)
 
 # ── Optional ML (required for real classification; heuristics work without) ──
-# sentence-transformers>=3.0.0
-# scikit-learn>=1.5.0
-# joblib>=1.4.0
-# numpy>=1.26.0
+sentence-transformers>=3.0.0
+scikit-learn>=1.5.0
+joblib>=1.4.0
+numpy>=1.26.0
+pandas>=2.0.0
 Flask-Cors>=3.0.0,<4.0
 Flask-Limiter>=2.0.0,<3.0

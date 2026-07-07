@@ -37,9 +37,10 @@ DRIFT_THRESHOLD  = 5
 
 # Explicit FSM: only these transitions are allowed
 ALLOWED_TRANSITIONS = {
-    "PRODUCTIVE":  ["PRODUCTIVE", "WARNING"],
-    "WARNING":     ["WARNING", "DISTRACTION", "PRODUCTIVE"],
-    "DISTRACTION": ["DISTRACTION", "WARNING"],
+    "PRODUCTIVE":  ["PRODUCTIVE", "WARNING", "NEUTRAL"],
+    "WARNING":     ["WARNING", "DISTRACTION", "PRODUCTIVE", "NEUTRAL"],
+    "DISTRACTION": ["DISTRACTION", "WARNING", "NEUTRAL"],
+    "NEUTRAL":     ["NEUTRAL", "PRODUCTIVE", "WARNING", "DISTRACTION"],
 }
 
 
@@ -197,7 +198,7 @@ class FocusEngine:
 
     # ── Event-Driven Classification Pipeline ─────────────────────────────────
 
-    def _on_state_change(self, raw_state: dict):
+    def _on_state_change(self, raw_state: dict, confidence_bonus: float = 0.0):
         if self.is_paused:
             return
         session = self.store.get_current_session()
@@ -228,7 +229,7 @@ class FocusEngine:
             intent_profile = self.intent_profile,
         )
 
-        confidence = features.get("confidence", 0)
+        confidence = features.get("confidence", 0) + confidence_bonus
         h_score    = features.get("heuristic_score", 0)
         ml_prob    = features.get("ml_prob", 0.0)
         ml_ready   = clf.ml_ready
@@ -327,13 +328,16 @@ class FocusEngine:
             last_intervention = self.last_intervention_timestamp
 
             # ── WARNING escalation timer management ──────────────────────────────
-            # Record when we entered WARNING so the timer can fire if we stay here.
-            if final_state == "WARNING" and self.last_state != "WARNING":
-                self._warning_since = now
+            # Arm the timer if we are in WARNING. If it's already running, it continues.
+            if final_state == "WARNING":
                 self._last_raw_state = raw_state
-                self._schedule_warning_escalation()
-            elif final_state != "WARNING":
+                if self._warning_since == 0.0:
+                    self._warning_since = now
+                if self._warning_timer is None or not self._warning_timer.is_alive():
+                    self._schedule_warning_escalation()
+            else:
                 self._warning_since = 0.0
+                self._warning_escalation_count = 0
                 self._cancel_warning_escalation()
 
             # Auto-reset recovery overlay when user returns to PRODUCTIVE
@@ -433,25 +437,27 @@ class FocusEngine:
 
     def _escalate_warning_if_stuck(self):
         """Called by the timer if WARNING hasn’t cleared in WARNING_ESCALATION_SEC seconds.
-
-        Re-runs classification against the last known raw_state so a prolonged
+        
+        Forces a re-classification of the same window. This ensures that a sustained
         WARNING on a distracting window can escalate to DISTRACTION without
-        requiring a new window-change event to trigger the callback.
+        requiring the user to change windows.
         """
         with self._lock:
             if self.current_state != "WARNING":
-                return  # already resolved
+                return
             raw = dict(self._last_raw_state)
+            self._warning_escalation_count = getattr(self, "_warning_escalation_count", 0) + 1
+            escalation_count = self._warning_escalation_count
 
         log.info(
-            "[Engine] WARNING persisted for >%ds without new event — "
-            "re-running classification for escalation.",
-            self.WARNING_ESCALATION_SEC,
+            "[Engine] WARNING persisted for >%ds (attempt #%d) — re-running "
+            "classification with escalation bonus.",
+            self.WARNING_ESCALATION_SEC, escalation_count,
         )
-        # Re-invoke the state change handler with the last known raw state.
-        # This may escalate WARNING → DISTRACTION if the window is still distraction.
         try:
-            self._on_state_change(raw)
+            # Pass the escalation count through so confidence can be nudged up
+            # the longer the same distraction persists.
+            self._on_state_change(raw, confidence_bonus=min(30, escalation_count * 15))
         except Exception as exc:
             log.debug("[Engine] _escalate_warning_if_stuck failed: %s", exc)
 
